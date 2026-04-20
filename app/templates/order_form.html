@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block title %}Nova encomenda{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Nova encomenda</h1>
+
+<form method="post" id="order-form">
+  <input type="hidden" name="num_plates" id="num_plates" value="1">
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label">Nome da peça / projeto</label>
+          <input name="name" class="form-control" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Cliente</label>
+          <input name="customer" class="form-control">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">% lucro</label>
+          <input name="profit_pct" type="number" step="0.01" min="0" class="form-control"
+                 value="{{ default_profit_pct }}" required>
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">Notas</label>
+          <input name="notes" class="form-control">
+        </div>
+        <div class="col-12">
+          <label class="form-label">Link do modelo <span class="text-muted">(MakerWorld, Printables, Thingiverse…)</span></label>
+          <input name="model_url" type="url" class="form-control" placeholder="https://...">
+        </div>
+        <div class="col-12">
+          <div class="form-check form-switch mt-1">
+            <input class="form-check-input" type="checkbox" role="switch"
+                   name="is_internal" id="is_internal" value="1">
+            <label class="form-check-label" for="is_internal">
+              <strong>Consumo interno</strong>
+              <span class="text-muted small ms-1">— uso pessoal, não conta para receitas nem lucro</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0">Pratos</h5>
+    <button type="button" class="btn btn-sm btn-outline-primary" id="add-plate">+ Adicionar prato</button>
+  </div>
+
+  {% if not filaments %}
+    <div class="alert alert-warning">
+      Ainda não tens filamentos. <a href="{{ url_for('main.filament_new') }}">Cria um primeiro</a>.
+    </div>
+  {% endif %}
+
+  <div id="plates-container">
+    <div class="plate-card card mb-3 border-secondary">
+      <div class="card-header d-flex justify-content-between align-items-center bg-body-secondary">
+        <span class="plate-label fw-semibold">Prato 1</span>
+        <button type="button" class="btn btn-sm btn-outline-danger remove-plate">× Remover prato</button>
+      </div>
+      <div class="card-body">
+        <div class="row g-3 mb-3">
+          <div class="col-auto">
+            <label class="form-label">Tempo de impressão</label>
+            <div class="d-flex align-items-center gap-2">
+              <input name="plate_0_hours" type="number" min="0" max="999" placeholder="0"
+                     class="form-control plate-hours" style="width:80px" required>
+              <span>h</span>
+              <input name="plate_0_minutes" type="number" min="0" max="59" placeholder="0"
+                     class="form-control plate-minutes" style="width:80px" required>
+              <span>m</span>
+            </div>
+          </div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h6 class="mb-0 text-muted">Filamentos</h6>
+          <button type="button" class="btn btn-sm btn-outline-secondary add-filament">+ Filamento</button>
+        </div>
+        <div class="filament-rows">
+          <div class="row g-2 align-items-end mb-2 fil-row">
+            <div class="col-md-8">
+              <label class="form-label">Filamento</label>
+              <select name="plate_0_filament_ids" class="form-select" required>
+                <option value="">— escolher —</option>
+                {% for f in filaments %}
+                  <option value="{{ f.id }}">
+                    {{ f.name }} · {{ f.material }} · {{ f.color }}
+                    (stock {{ '%.0f'|format(f.stock_g) }} g, {{ '%.2f'|format(f.avg_price_per_kg) }} €/kg)
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Peso (g)</label>
+              <input name="plate_0_weights" type="number" step="0.01" min="0.01" class="form-control" required>
+            </div>
+            <div class="col-md-1">
+              <button type="button" class="btn btn-outline-danger w-100 remove-filament">×</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex justify-content-between mt-3">
+    <a href="{{ url_for('main.orders_list') }}" class="btn btn-link">Cancelar</a>
+    <button class="btn btn-primary">Criar encomenda</button>
+  </div>
+</form>
+
+<template id="plate-template">
+  <div class="plate-card card mb-3 border-secondary">
+    <div class="card-header d-flex justify-content-between align-items-center bg-body-secondary">
+      <span class="plate-label fw-semibold">Prato N</span>
+      <button type="button" class="btn btn-sm btn-outline-danger remove-plate">× Remover prato</button>
+    </div>
+    <div class="card-body">
+      <div class="row g-3 mb-3">
+        <div class="col-auto">
+          <label class="form-label">Tempo de impressão</label>
+          <div class="d-flex align-items-center gap-2">
+            <input type="number" min="0" max="999" placeholder="0"
+                   class="form-control plate-hours" style="width:80px" required>
+            <span>h</span>
+            <input type="number" min="0" max="59" placeholder="0"
+                   class="form-control plate-minutes" style="width:80px" required>
+            <span>m</span>
+          </div>
+        </div>
+      </div>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0 text-muted">Filamentos</h6>
+        <button type="button" class="btn btn-sm btn-outline-secondary add-filament">+ Filamento</button>
+      </div>
+      <div class="filament-rows">
+        <div class="row g-2 align-items-end mb-2 fil-row">
+          <div class="col-md-8">
+            <label class="form-label">Filamento</label>
+            <select class="form-select" required>
+              <option value="">— escolher —</option>
+              {% for f in filaments %}
+                <option value="{{ f.id }}">
+                  {{ f.name }} · {{ f.material }} · {{ f.color }}
+                  (stock {{ '%.0f'|format(f.stock_g) }} g, {{ '%.2f'|format(f.avg_price_per_kg) }} €/kg)
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Peso (g)</label>
+            <input type="number" step="0.01" min="0.01" class="form-control" required>
+          </div>
+          <div class="col-md-1">
+            <button type="button" class="btn btn-outline-danger w-100 remove-filament">×</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const container = document.getElementById('plates-container');
+  const tmpl = document.getElementById('plate-template');
+
+  function reindex() {
+    const plates = container.querySelectorAll('.plate-card');
+    document.getElementById('num_plates').value = plates.length;
+    plates.forEach((card, pi) => {
+      card.querySelector('.plate-label').textContent = `Prato ${pi + 1}`;
+      card.querySelector('.plate-hours').name = `plate_${pi}_hours`;
+      card.querySelector('.plate-minutes').name = `plate_${pi}_minutes`;
+      card.querySelectorAll('.filament-rows select').forEach(s => {
+        s.name = `plate_${pi}_filament_ids`;
+      });
+      card.querySelectorAll('.filament-rows input[type="number"]').forEach(i => {
+        i.name = `plate_${pi}_weights`;
+      });
+    });
+  }
+
+  document.getElementById('add-plate').addEventListener('click', () => {
+    const clone = tmpl.content.cloneNode(true);
+    container.appendChild(clone);
+    reindex();
+  });
+
+  container.addEventListener('click', e => {
+    if (e.target.classList.contains('remove-plate')) {
+      if (container.querySelectorAll('.plate-card').length > 1) {
+        e.target.closest('.plate-card').remove();
+        reindex();
+      }
+    }
+    if (e.target.classList.contains('add-filament')) {
+      const rows = e.target.closest('.plate-card').querySelector('.filament-rows');
+      const clone = rows.querySelector('.fil-row').cloneNode(true);
+      clone.querySelector('select').value = '';
+      clone.querySelector('input[type="number"]').value = '';
+      rows.appendChild(clone);
+      reindex();
+    }
+    if (e.target.classList.contains('remove-filament')) {
+      const rows = e.target.closest('.filament-rows');
+      if (rows.querySelectorAll('.fil-row').length > 1) {
+        e.target.closest('.fil-row').remove();
+        reindex();
+      }
+    }
+  });
+
+  reindex();
+</script>
+{% endblock %}

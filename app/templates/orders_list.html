@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Encomendas{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Encomendas</h1>
+  <a href="{{ url_for('main.order_new') }}" class="btn btn-primary">+ Nova encomenda</a>
+</div>
+
+<div class="mb-2 d-flex flex-wrap gap-2">
+  <div class="btn-group btn-group-sm">
+    <a href="{{ url_for('main.orders_list', status='all', type=type_filter) }}"
+       class="btn {{ 'btn-secondary' if status_filter == 'all' else 'btn-outline-secondary' }}">Todas</a>
+    <a href="{{ url_for('main.orders_list', status='pending', type=type_filter) }}"
+       class="btn {{ 'btn-secondary' if status_filter == 'pending' else 'btn-outline-secondary' }}">Pendentes</a>
+    <a href="{{ url_for('main.orders_list', status='printed', type=type_filter) }}"
+       class="btn {{ 'btn-info' if status_filter == 'printed' else 'btn-outline-info' }}">Impressas</a>
+    <a href="{{ url_for('main.orders_list', status='delivered', type=type_filter) }}"
+       class="btn {{ 'btn-success' if status_filter == 'delivered' else 'btn-outline-success' }}">Entregues</a>
+  </div>
+  <div class="btn-group btn-group-sm">
+    <a href="{{ url_for('main.orders_list', status=status_filter, type='all') }}"
+       class="btn {{ 'btn-dark' if type_filter == 'all' else 'btn-outline-dark' }}">Todos os tipos</a>
+    <a href="{{ url_for('main.orders_list', status=status_filter, type='commercial') }}"
+       class="btn {{ 'btn-primary' if type_filter == 'commercial' else 'btn-outline-primary' }}">Comerciais</a>
+    <a href="{{ url_for('main.orders_list', status=status_filter, type='internal') }}"
+       class="btn {{ 'btn-warning' if type_filter == 'internal' else 'btn-outline-warning' }}">Consumo interno</a>
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table mb-0 align-middle">
+      <thead>
+        <tr>
+          <th>Nome</th><th>Cliente</th><th>Data</th>
+          <th class="text-end">Tempo</th>
+          <th class="text-end">Custo</th>
+          <th class="text-end">Preço venda</th>
+          <th class="text-end">Lucro</th>
+          <th>Estado</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for o in orders %}
+        <tr{% if o.is_internal %} class="table-warning"{% endif %}>
+          <td>
+            <a href="{{ url_for('main.order_detail', oid=o.id) }}">{{ o.name }}</a>
+            {% if o.is_internal %}
+              <span class="badge bg-warning text-dark ms-1">Interno</span>
+            {% endif %}
+          </td>
+          <td>{{ o.customer or '—' }}</td>
+          <td>{{ o.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td class="text-end">{{ o.total_print_time_hours|duration }}</td>
+          <td class="text-end">{{ '%.2f'|format(o.total_cost) }} €</td>
+          {% if o.is_internal %}
+            <td class="text-end text-muted">—</td>
+            <td class="text-end text-muted">—</td>
+          {% else %}
+            <td class="text-end"><strong>{{ '%.2f'|format(o.sell_price) }} €</strong></td>
+            <td class="text-end text-success">+{{ '%.2f'|format(o.profit_value) }} €</td>
+          {% endif %}
+          <td>
+            {% if o.status == 'delivered' %}
+              <span class="badge bg-success">Entregue</span>
+            {% elif o.status == 'printed' %}
+              <span class="badge bg-info">Impresso</span>
+            {% else %}
+              <span class="badge bg-secondary">Pendente</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <form method="post" action="{{ url_for('main.order_delete', oid=o.id) }}" class="d-inline"
+                  onsubmit="return confirm('Apagar encomenda e repor stock?');">
+              <button class="btn btn-sm btn-outline-danger">Apagar</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="9" class="text-center text-muted py-4">Sem encomendas.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

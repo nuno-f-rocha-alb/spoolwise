@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Filamentos{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Filamentos</h1>
+  <a href="{{ url_for('main.filament_new') }}" class="btn btn-primary">+ Novo filamento</a>
+</div>
+
+<div class="mb-1">
+  <span class="text-muted small me-2">Marca:</span>
+  <a href="{{ url_for('main.filaments_list', brand='all', material=material_filter, sort=sort, dir=direction) }}"
+     class="btn btn-sm {{ 'btn-secondary' if brand_filter == 'all' else 'btn-outline-secondary' }}">Todas</a>
+  {% for b in brands %}
+  <a href="{{ url_for('main.filaments_list', brand=b, material=material_filter, sort=sort, dir=direction) }}"
+     class="btn btn-sm {{ 'btn-secondary' if brand_filter == b else 'btn-outline-secondary' }}">{{ b }}</a>
+  {% endfor %}
+</div>
+
+<div class="mb-3">
+  <span class="text-muted small me-2">Material:</span>
+  <a href="{{ url_for('main.filaments_list', material='all', brand=brand_filter, sort=sort, dir=direction) }}"
+     class="btn btn-sm {{ 'btn-secondary' if material_filter == 'all' else 'btn-outline-secondary' }}">Todos</a>
+  {% for m in materials %}
+  <a href="{{ url_for('main.filaments_list', material=m, brand=brand_filter, sort=sort, dir=direction) }}"
+     class="btn btn-sm {{ 'btn-secondary' if material_filter == m else 'btn-outline-secondary' }}">{{ m }}</a>
+  {% endfor %}
+</div>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table mb-0 align-middle">
+      <thead>
+        <tr>
+          {% set next_dir = 'desc' if direction == 'asc' else 'asc' %}
+          {% macro sort_icon(col) %}{% if sort == col %}{{ '↑' if direction == 'asc' else '↓' }}{% else %}⇅{% endif %}{% endmacro %}
+          {% macro sort_url(col) %}{{ url_for('main.filaments_list', brand=brand_filter, material=material_filter, sort=col, dir=next_dir if sort==col else 'asc') }}{% endmacro %}
+          <th><a class="text-decoration-none" href="{{ sort_url('name') }}">Marca {{ sort_icon('name') }}</a></th>
+          <th><a class="text-decoration-none" href="{{ sort_url('material') }}">Material {{ sort_icon('material') }}</a></th>
+          <th><a class="text-decoration-none" href="{{ sort_url('color') }}">Cor {{ sort_icon('color') }}</a></th>
+          <th class="text-end"><a class="text-decoration-none" href="{{ sort_url('stock') }}">Stock (kg) {{ sort_icon('stock') }}</a></th>
+          <th class="text-end"><a class="text-decoration-none" href="{{ sort_url('price') }}">Preço médio (€/kg) {{ sort_icon('price') }}</a></th>
+          <th class="text-end">Valor</th>
+          <th class="text-end"></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for f in filaments %}
+        <tr>
+          <td>{{ f.name }}</td>
+          <td><span class="badge bg-secondary-subtle text-secondary-emphasis">{{ f.material }}</span></td>
+          <td>
+            <span class="badge-swatch" style="background-color: {{ f.color }}"></span>{{ f.color }}
+          </td>
+          <td class="text-end {% if f.stock_kg <= 0.1 %}text-danger fw-bold{% endif %}">
+            {{ '%.3f'|format(f.stock_kg) }}
+          </td>
+          <td class="text-end">{{ '%.2f'|format(f.avg_price_per_kg) }}</td>
+          <td class="text-end">{{ '%.2f'|format(f.stock_value) }} €</td>
+          <td class="text-end">
+            <a class="btn btn-sm btn-primary" href="{{ url_for('main.filament_purchase', fid=f.id) }}">Comprar / Ajustar</a>
+            <form method="post" action="{{ url_for('main.filament_delete', fid=f.id) }}" class="d-inline"
+                  onsubmit="return confirm('Apagar {{ f.name }} {{ f.color }}?');">
+              <button class="btn btn-sm btn-outline-danger">Apagar</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="text-center text-muted py-4">Ainda não tens filamentos.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

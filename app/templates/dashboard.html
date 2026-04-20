@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h6 class="text-muted mb-1">Stock total</h6>
+        <h3 class="mb-0">{{ '%.2f'|format(total_stock_kg) }} kg</h3>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h6 class="text-muted mb-1">Valor em inventário</h6>
+        <h3 class="mb-0">{{ '%.2f'|format(total_stock_value) }} €</h3>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h6 class="text-muted mb-1">Filamentos distintos</h6>
+        <h3 class="mb-0">{{ filaments|length }}</h3>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-7">
+    <div class="card shadow-sm">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Inventário</span>
+        <a href="{{ url_for('main.filaments_list') }}" class="small">ver todos</a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Nome</th><th>Material</th><th>Cor</th><th class="text-end">Stock</th><th class="text-end">Preço médio</th></tr></thead>
+          <tbody>
+          {% for f in filaments %}
+            <tr>
+              <td>{{ f.name }}</td>
+              <td>{{ f.material }}</td>
+              <td>{{ f.color }}</td>
+              <td class="text-end">{{ '%.2f'|format(f.stock_kg) }} kg</td>
+              <td class="text-end">{{ '%.2f'|format(f.avg_price_per_kg) }} €/kg</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5" class="text-center text-muted py-3">Sem filamentos. <a href="{{ url_for('main.filament_new') }}">Adicionar</a>.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-5">
+    <div class="card shadow-sm">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Encomendas recentes</span>
+        <a href="{{ url_for('main.orders_list') }}" class="small">ver todas</a>
+      </div>
+      <ul class="list-group list-group-flush">
+      {% for o in recent %}
+        <li class="list-group-item d-flex justify-content-between align-items-start">
+          <div>
+            <a href="{{ url_for('main.order_detail', oid=o.id) }}"><strong>{{ o.name }}</strong></a>
+            <div class="small text-muted">{{ o.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+          </div>
+          {% if o.is_internal %}
+            <span class="badge bg-warning text-dark rounded-pill" title="Consumo interno — custo real">{{ '%.2f'|format(o.total_cost) }} €</span>
+          {% else %}
+            <span class="badge bg-primary rounded-pill">{{ '%.2f'|format(o.sell_price) }} €</span>
+          {% endif %}
+        </li>
+      {% else %}
+        <li class="list-group-item text-muted text-center">Sem encomendas.</li>
+      {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

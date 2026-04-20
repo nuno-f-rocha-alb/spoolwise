@@ -1,0 +1,74 @@
+{% from 'bootstrap5/nav.html' import render_nav_item %}
+<!doctype html>
+<html lang="pt" data-bs-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}3D Print Manager{% endblock %}</title>
+  {{ bootstrap.load_css() }}
+  <style>
+    body { padding-top: 4.5rem; }
+    main.container { padding-top: 1.5rem; }
+    .badge-swatch { display:inline-block; width:14px; height:14px; border-radius:50%; margin-right:6px; border:1px solid #ccc; vertical-align:middle; }
+    .filament-rows .fil-row:not(:first-child) label { display: none; }
+    #theme-toggle { font-size: 1.1rem; cursor:pointer; background:none; border:none; color:inherit; padding:0 0.5rem; }
+  </style>
+  <script>
+    (function() {
+      const t = localStorage.getItem('theme') || 'light';
+      document.documentElement.setAttribute('data-bs-theme', t);
+    })();
+  </script>
+</head>
+<body>
+  <nav class="navbar navbar-expand-md navbar-dark bg-dark fixed-top">
+    <div class="container-fluid">
+      <a class="navbar-brand" href="{{ url_for('main.dashboard') }}">🖨️ 3D Print Manager</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="nav">
+        <ul class="navbar-nav me-auto">
+          {{ render_nav_item('main.dashboard', 'Dashboard') }}
+          {{ render_nav_item('main.filaments_list', 'Filamentos') }}
+          {{ render_nav_item('main.orders_list', 'Encomendas') }}
+          {{ render_nav_item('main.stats', 'Estatísticas') }}
+          {{ render_nav_item('main.settings', 'Definições') }}
+        </ul>
+        <a class="btn btn-primary me-2" href="{{ url_for('main.order_new') }}">+ Nova encomenda</a>
+        <a class="btn btn-outline-light me-2" href="{{ url_for('main.filament_new') }}">+ Filamento</a>
+        <button id="theme-toggle" title="Alternar modo claro/escuro">🌙</button>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, msg in messages %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+          {{ msg }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+
+  {{ bootstrap.load_js() }}
+  {% block scripts %}{% endblock %}
+  <script>
+    const btn = document.getElementById('theme-toggle');
+    function applyTheme(t) {
+      document.documentElement.setAttribute('data-bs-theme', t);
+      btn.textContent = t === 'dark' ? '☀️' : '🌙';
+    }
+    applyTheme(localStorage.getItem('theme') || 'light');
+    btn.addEventListener('click', () => {
+      const next = document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('theme', next);
+      applyTheme(next);
+    });
+  </script>
+</body>
+</html>

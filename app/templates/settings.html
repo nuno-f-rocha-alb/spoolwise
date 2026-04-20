@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Definições{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Definições globais</h1>
+<form method="post" class="card shadow-sm">
+  <div class="card-body">
+    <div class="mb-3">
+      <label class="form-label">Preço da electricidade (€/kWh)</label>
+      <input type="number" step="0.0001" min="0" name="electricity_price_per_kwh"
+             value="{{ electricity_price_per_kwh }}" class="form-control" required>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Potência da impressora (W)</label>
+      <input type="number" step="0.01" min="0" name="printer_power_watts"
+             value="{{ printer_power_watts }}" class="form-control" required>
+      <div class="form-text">Usado para calcular o consumo (W × tempo h ÷ 1000 = kWh).</div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">% lucro por defeito</label>
+      <input type="number" step="0.01" min="0" name="default_profit_pct"
+             value="{{ default_profit_pct }}" class="form-control" required>
+    </div>
+  </div>
+  <div class="card-footer text-end">
+    <button class="btn btn-primary">Guardar</button>
+  </div>
+</form>
+{% endblock %}
