@@ -6,6 +6,20 @@ A self-hosted web app to manage 3D print orders, filament inventory, costs and b
 
 ---
 
+## Screenshots
+
+| Light | Dark |
+|---|---|
+| ![Dashboard](docs/screenshots/dashboard_lightmode.png) | ![Dashboard](docs/screenshots/dashboard_darkmode.png) |
+| ![Orders](docs/screenshots/orders_lightmode.png) | ![Orders](docs/screenshots/orders_darkmode.png) |
+| ![Order detail](docs/screenshots/order-details_lightmode.png) | ![Order detail](docs/screenshots/order-details_darkmode.png) |
+| ![Statistics](docs/screenshots/statistics_lightmode.png) | ![Statistics](docs/screenshots/statistics_darkmode.png) |
+| ![Filaments](docs/screenshots/filaments_lightmode.png) | ![Filaments](docs/screenshots/filaments_darkmode.png) |
+| ![New order](docs/screenshots/new-order_lightmode.png) | ![New order](docs/screenshots/new-order_darkmode.png) |
+| ![Settings](docs/screenshots/settings_lightmode.png) | ![Settings](docs/screenshots/settings_darkmode.png) |
+
+---
+
 ## Features
 
 | Area | Details |
