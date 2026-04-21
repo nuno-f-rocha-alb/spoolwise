@@ -7,6 +7,6 @@ __pycache__/
 .idea/
 .vscode/
 
-# Claude Code memory (local only)
-.claude/projects/
+# Claude Code (local only)
+.claude/
 
