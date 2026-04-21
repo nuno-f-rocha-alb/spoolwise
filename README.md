@@ -1,42 +1,59 @@
 # 3D Print Manager
 
-App Flask + Bootstrap-Flask (Bootstrap 5) para gerir encomendas de impressão 3D com MariaDB.
+Flask + Bootstrap 5 web app to manage 3D print orders, filament inventory, costs and business statistics. Backed by MariaDB, deployable via Docker.
 
-## Funcionalidades
-- Inventário global de filamentos (stock em g, **preço médio ponderado** atualizado a cada compra).
-- Definições globais: preço da electricidade (€/kWh), potência da impressora (W) e % lucro por defeito.
-- Encomendas com múltiplos filamentos (multi-color), cálculo automático de custo de filamento, custo de electricidade, preço de venda e lucro.
-- Ao criar uma encomenda o peso dos filamentos é automaticamente descontado ao stock. Ao apagar a encomenda o stock é reposto.
-- Snapshot do preço do filamento e das definições no momento da encomenda (para que preços passados não mudem se alterares as definições).
+## Features
 
-## Correr com Docker
+- **Filament inventory** — stock in grams, weighted-average price updated on every purchase.
+- **Multi-plate orders** — each plate has its own print time and filaments (multi-colour supported).
+- **Automatic cost calculation** — filament cost, electricity cost, sale price and profit per order.
+- **Price snapshots** — filament price and settings are captured at order creation; historical costs never change when you update prices later.
+- **Stock management** — stock is deducted when an order is created and restored when it is deleted. Manual adjustment available without affecting the weighted average.
+- **Personal use flag** — mark orders as personal use; they deduct stock and track costs but are excluded from revenue and profit statistics.
+- **Statistics page** — revenue, cost, profit, margins, monthly breakdown, and filament stock charts.
+- **Configurable currency** — change the currency symbol in Settings (default `€`).
+- **Dark / light mode** — toggle in the navbar, persisted in `localStorage`.
+- **MakerWorld / Printables / Thingiverse preview** — paste a model URL and the app fetches the title and cover image automatically.
+
+## Running with Docker (recommended)
 
 ```bash
-docker compose up --build
+cp .env.example .env   # fill in your passwords and secret key
+docker compose up -d
 ```
 
-App em http://localhost:5000
-MariaDB em `localhost:3306` (user `printing`, pass `printing`, db `printing_app`).
+App at http://localhost:5000  
+MariaDB exposed on port `3307` on the host (configurable in `.env`).
 
-## Correr sem Docker (só a app, apontando para a MariaDB do compose)
+## Running locally (app only, DB from Docker)
 
 ```bash
 docker compose up -d db
-python -m venv .venv && source .venv/bin/activate  # ou .venv\Scripts\activate no Windows
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
 python run.py
 ```
 
-## Fluxo típico
-1. **Definições** → configurar preço da electricidade, potência da impressora e % lucro default.
-2. **Filamentos → + Novo filamento** → registar filamento (opcionalmente com stock inicial e preço).
-3. **Filamentos → Comprar** → cada nova compra atualiza o preço médio ponderado:
-   `novo_avg = (stock_atual_kg * avg_atual + compra_kg * preço_compra) / (stock_atual_kg + compra_kg)`
-4. **+ Nova encomenda** → escolher filamentos (multi), peso, tempo e % lucro. O stock é descontado.
+## Typical workflow
 
-## Modelo de cálculo
-- `custo_filamento = Σ (peso_g / 1000 × preço_médio_€/kg)`
-- `custo_luz = potência_W / 1000 × horas × €/kWh`
-- `custo_total = custo_filamento + custo_luz`
-- `preço_venda = custo_total × (1 + lucro_% / 100)`
+1. **Settings** → set electricity price, printer power, and default profit %.
+2. **Filaments → + New filament** → register a filament with optional initial stock and price.
+3. **Filaments → Buy / Adjust** → each new purchase updates the weighted average:  
+   `new_avg = (current_stock_kg × current_avg + purchase_kg × purchase_price) / (current_stock_kg + purchase_kg)`
+4. **+ New order** → choose filaments, weight per plate, print time, and profit %. Stock is deducted automatically.
+
+## Cost model
+
+```
+filament_cost  = Σ (weight_g / 1000 × avg_price_per_kg)
+electricity_cost = (printer_watts / 1000) × print_hours × price_per_kwh
+total_cost     = filament_cost + electricity_cost
+sale_price     = total_cost × (1 + profit_pct / 100)
+```
+
+## CI/CD
+
+Pushing to `main` triggers a GitHub Actions workflow that builds the Docker image and pushes it to Docker Hub (`nunobifes/printing-app:latest`).
+
+Required repository secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
