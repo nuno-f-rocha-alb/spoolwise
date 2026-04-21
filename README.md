@@ -81,7 +81,7 @@ services:
       MARIADB_USER: ${MARIADB_USER}
       MARIADB_PASSWORD: ${MARIADB_PASSWORD}
     ports:
-      - "3307:3306"          # change 3307 if that port is already taken
+      - "3306:3306"
     volumes:
       - db_data:/var/lib/mysql
     healthcheck:
@@ -90,7 +90,7 @@ services:
       retries: 10
 
   app:
-    image: nunobifes/printing-app   # pulled from Docker Hub
+    image: nunobifes/printing-app
     restart: unless-stopped
     depends_on:
       db:
