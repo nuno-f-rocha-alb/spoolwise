@@ -197,7 +197,9 @@ def filament_new():
         flash("Filament created.", "success")
         return redirect(url_for("main.filaments_list"))
 
-    return render_template("filament_form.html")
+    brands = [r[0] for r in db.session.query(Filament.name).distinct().order_by(Filament.name).all()]
+    materials = [r[0] for r in db.session.query(Filament.material).distinct().order_by(Filament.material).all()]
+    return render_template("filament_form.html", brands=brands, materials=materials)
 
 
 @bp.route("/filaments/<int:fid>/purchase", methods=["GET", "POST"])

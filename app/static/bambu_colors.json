@@ -1,4 +1,7 @@
 {
+  "_aliases": {
+    "Bambu": "Bambu Lab"
+  },
   "Bambu Lab": {
     "PLA Basic": {
       "Jade White": "#FFFFFF",

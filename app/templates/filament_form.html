@@ -7,16 +7,26 @@
     <div class="row g-3">
       <div class="col-md-6">
         <label class="form-label">Brand / Name</label>
-        <input name="name" id="brandInput" class="form-control" required>
+        <input name="name" id="brandInput" class="form-control" required
+               list="brandList" autocomplete="off">
+        <datalist id="brandList">
+          {% for b in brands %}<option value="{{ b }}">{% endfor %}
+        </datalist>
       </div>
       <div class="col-md-3">
         <label class="form-label">Material</label>
-        <input name="material" id="materialInput" class="form-control" value="PLA">
+        <input name="material" id="materialInput" class="form-control" value="PLA"
+               list="materialList" autocomplete="off">
+        <datalist id="materialList">
+          {% for m in materials %}<option value="{{ m }}">{% endfor %}
+        </datalist>
       </div>
       <div class="col-md-3">
         <label class="form-label">Color</label>
         <div class="input-group">
-          <input name="color" id="colorName" class="form-control" placeholder="e.g. Black">
+          <input name="color" id="colorName" class="form-control" placeholder="e.g. Black"
+                 list="colorList" autocomplete="off">
+          <datalist id="colorList"></datalist>
           <input type="color" id="colorPicker" name="color_hex" value="#000000"
                  class="form-control form-control-color" title="Color hex — auto-filled from Bambu palette">
         </div>
@@ -40,24 +50,83 @@
 {% endblock %}
 {% block scripts %}
 <script>
+const DB_MATERIALS = {{ materials | tojson }};
 let BAMBU = null;
+
 fetch("{{ url_for('static', filename='bambu_colors.json') }}")
   .then(r => r.json())
-  .then(data => { BAMBU = data; });
+  .then(data => { BAMBU = data; updateMaterialList(); updateColorList(); });
+
+function resolveAlias(brand) {
+  if (!BAMBU) return brand;
+  const aliases = BAMBU._aliases || {};
+  const bL = brand.toLowerCase();
+  for (const [alias, target] of Object.entries(aliases)) {
+    if (alias.toLowerCase() === bL) return target;
+  }
+  return brand;
+}
+
+function getBambuMaterials(brand) {
+  if (!BAMBU) return [];
+  const resolved = resolveAlias(brand);
+  for (const [bKey, materials] of Object.entries(BAMBU)) {
+    if (bKey.startsWith('_')) continue;
+    if (bKey.toLowerCase() === resolved.toLowerCase()) return Object.keys(materials);
+  }
+  return [];
+}
+
+function getBambuColors(brand, material) {
+  if (!BAMBU) return [];
+  const resolved = resolveAlias(brand);
+  for (const [bKey, materials] of Object.entries(BAMBU)) {
+    if (bKey.startsWith('_')) continue;
+    if (bKey.toLowerCase() !== resolved.toLowerCase()) continue;
+    for (const [mKey, colors] of Object.entries(materials)) {
+      if (mKey.toLowerCase() === material.toLowerCase()) return Object.keys(colors);
+    }
+  }
+  return [];
+}
 
 function lookupHex(brand, material, color) {
   if (!BAMBU || !color) return null;
-  const bL = brand.toLowerCase(), mL = material.toLowerCase(), cL = color.toLowerCase();
+  const resolved = resolveAlias(brand);
+  const cL = color.toLowerCase();
   for (const [bKey, materials] of Object.entries(BAMBU)) {
-    if (bKey.toLowerCase() !== bL) continue;
+    if (bKey.startsWith('_')) continue;
+    if (bKey.toLowerCase() !== resolved.toLowerCase()) continue;
     for (const [mKey, colors] of Object.entries(materials)) {
-      if (mKey.toLowerCase() !== mL) continue;
+      if (mKey.toLowerCase() !== material.toLowerCase()) continue;
       for (const [cKey, hex] of Object.entries(colors)) {
         if (cKey.toLowerCase() === cL) return hex;
       }
     }
   }
   return null;
+}
+
+function setDatalist(id, values) {
+  const dl = document.getElementById(id);
+  dl.innerHTML = '';
+  [...new Set(values)].forEach(v => {
+    const o = document.createElement('option');
+    o.value = v;
+    dl.appendChild(o);
+  });
+}
+
+function updateMaterialList() {
+  const brand = document.getElementById('brandInput').value.trim();
+  const bambuMats = getBambuMaterials(brand);
+  setDatalist('materialList', [...DB_MATERIALS, ...bambuMats]);
+}
+
+function updateColorList() {
+  const brand    = document.getElementById('brandInput').value.trim();
+  const material = document.getElementById('materialInput').value.trim();
+  setDatalist('colorList', getBambuColors(brand, material));
 }
 
 function tryAutoFill() {
@@ -75,8 +144,8 @@ function tryAutoFill() {
   }
 }
 
-document.getElementById('brandInput').addEventListener('input', tryAutoFill);
+document.getElementById('brandInput').addEventListener('input', () => { updateMaterialList(); updateColorList(); tryAutoFill(); });
+document.getElementById('materialInput').addEventListener('input', () => { updateColorList(); tryAutoFill(); });
 document.getElementById('colorName').addEventListener('input', tryAutoFill);
-document.getElementById('materialInput').addEventListener('input', tryAutoFill);
 </script>
 {% endblock %}

@@ -46,13 +46,24 @@ def _run_additive_migrations(app):
             conn.commit()
 
 
-def _lookup_bambu_hex(bambu, brand, material, color):
-    """Look up hex by brand → material → color, with case-insensitive fallback."""
+def _resolve_brand(bambu, brand):
+    """Resolve brand name through aliases (case-insensitive)."""
+    aliases = bambu.get("_aliases", {})
     brand_l = brand.lower()
+    for alias, target in aliases.items():
+        if alias.lower() == brand_l:
+            return target
+    return brand
+
+
+def _lookup_bambu_hex(bambu, brand, material, color):
+    """Look up hex by brand → material → color, with alias and case-insensitive support."""
+    resolved = _resolve_brand(bambu, brand)
+    brand_l = resolved.lower()
     material_l = material.lower()
     color_l = color.lower()
     for b_key, materials in bambu.items():
-        if b_key.lower() != brand_l:
+        if b_key.startswith("_") or b_key.lower() != brand_l:
             continue
         for m_key, colors in materials.items():
             if m_key.lower() != material_l:
