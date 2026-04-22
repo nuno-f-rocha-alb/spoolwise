@@ -121,6 +121,12 @@ class PrintOrder(db.Model):
         cascade="all, delete-orphan",
         order_by="PrintPlate.position",
     )
+    links = db.relationship(
+        "OrderLink",
+        backref="order",
+        cascade="all, delete-orphan",
+        order_by="OrderLink.position",
+    )
 
     @property
     def total_print_time_hours(self):
@@ -167,6 +173,16 @@ class PrintOrder(db.Model):
             self.delivered_at = self.delivered_at or datetime.utcnow()
         else:
             self.delivered_at = None
+
+
+class OrderLink(db.Model):
+    __tablename__ = "order_links"
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("print_orders.id"), nullable=False)
+    position = db.Column(db.Integer, nullable=False, default=0)
+    url = db.Column(db.Text, nullable=False)
+    title = db.Column(db.String(300), nullable=True)
+    image = db.Column(db.String(500), nullable=True)
 
 
 class PrintPlate(db.Model):

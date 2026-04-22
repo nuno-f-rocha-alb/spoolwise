@@ -64,24 +64,22 @@
     </div>
     {% endfor %}
 
-    {% if order.model_url %}
-      <a href="{{ order.model_url }}" target="_blank" rel="noopener" class="text-decoration-none d-block">
-        <div class="card shadow-sm mt-1 mb-1 overflow-hidden" style="cursor:pointer;">
-          {% if order.model_image %}
-            <img src="{{ order.model_image }}" class="card-img-top w-100"
+    {% for link in order.links %}
+      <a href="{{ link.url }}" target="_blank" rel="noopener" class="text-decoration-none d-block mt-1">
+        <div class="card shadow-sm overflow-hidden" style="cursor:pointer;">
+          {% if link.image %}
+            <img src="{{ link.image }}" class="card-img-top w-100"
                  style="max-height:200px; object-fit:cover;" alt="">
           {% endif %}
           <div class="card-body py-2">
-            <div class="small fw-semibold">
-              {{ order.model_title or order.model_url }}
-            </div>
-            {% if order.model_title %}
-            <div class="small text-muted text-truncate">{{ order.model_url }}</div>
+            <div class="small fw-semibold">{{ link.title or link.url }}</div>
+            {% if link.title %}
+            <div class="small text-muted text-truncate">{{ link.url }}</div>
             {% endif %}
           </div>
         </div>
       </a>
-    {% endif %}
+    {% endfor %}
 
     {% if order.notes %}
       <div class="card shadow-sm mt-1">

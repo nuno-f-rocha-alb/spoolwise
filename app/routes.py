@@ -10,6 +10,7 @@ from .models import (
     Filament,
     FilamentPurchase,
     PrintOrder,
+    OrderLink,
     PrintPlate,
     PlateFilament,
 )
@@ -284,7 +285,8 @@ def order_new():
         name = request.form.get("name", "").strip()
         customer = request.form.get("customer", "").strip() or None
         notes = request.form.get("notes", "").strip() or None
-        model_url = request.form.get("model_url", "").strip() or None
+        raw_urls = [u.strip() for u in request.form.getlist("model_url") if u.strip()]
+        model_url = "\n".join(raw_urls) or None
         is_internal = request.form.get("is_internal") == "1"
         profit_pct = _dec(
             request.form.get("profit_pct"),
@@ -359,15 +361,11 @@ def order_new():
             filament_objs[fid] = f
 
         # Create order
-        model_title, model_image = _fetch_og(model_url) if model_url else (None, None)
-
         order = PrintOrder(
             name=name,
             customer=customer,
             notes=notes,
-            model_url=model_url,
-            model_title=model_title,
-            model_image=model_image,
+            model_url=raw_urls[0] if raw_urls else None,
             profit_pct=profit_pct,
             is_internal=is_internal,
             electricity_price_per_kwh=Setting.get("electricity_price_per_kwh"),
@@ -375,6 +373,12 @@ def order_new():
         )
         db.session.add(order)
         db.session.flush()
+
+        for pos, url in enumerate(raw_urls):
+            title, image = _fetch_og(url)
+            db.session.add(OrderLink(
+                order_id=order.id, position=pos, url=url, title=title, image=image
+            ))
 
         for pos, (pt, plate_items) in enumerate(plates_data, start=1):
             plate = PrintPlate(order_id=order.id, position=pos, print_time_hours=pt)

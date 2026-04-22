@@ -74,6 +74,26 @@ def _lookup_bambu_hex(bambu, brand, material, color):
     return None
 
 
+def _migrate_order_links():
+    """One-time: copy existing model_url/title/image into order_links rows."""
+    from .models import PrintOrder, OrderLink
+    orders = PrintOrder.query.filter(
+        PrintOrder.model_url.isnot(None),
+    ).all()
+    for order in orders:
+        if order.links:
+            continue
+        link = OrderLink(
+            order_id=order.id,
+            position=0,
+            url=order.model_url,
+            title=order.model_title,
+            image=order.model_image,
+        )
+        db.session.add(link)
+    db.session.commit()
+
+
 def _backfill_color_hex(app):
     """Populate color_hex for filaments that don't have one yet."""
     bambu_path = os.path.join(app.root_path, "static", "bambu_colors.json")
@@ -133,6 +153,7 @@ def create_app():
                 time.sleep(3)
         # Additive migrations: add columns introduced after initial schema
         _run_additive_migrations(app)
+        _migrate_order_links()
         _backfill_color_hex(app)
         from .models import Setting
         Setting.ensure_defaults()

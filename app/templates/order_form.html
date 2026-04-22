@@ -27,8 +27,14 @@
           <input name="notes" class="form-control">
         </div>
         <div class="col-12">
-          <label class="form-label">Model link <span class="text-muted">(MakerWorld, Printables, Thingiverse…)</span></label>
-          <input name="model_url" type="url" class="form-control" placeholder="https://...">
+          <label class="form-label">Model links <span class="text-muted small">(MakerWorld, Printables, Thingiverse…)</span></label>
+          <div id="url-rows">
+            <div class="url-row d-flex gap-2 mb-2">
+              <input name="model_url" type="url" class="form-control" placeholder="https://...">
+              <button type="button" class="btn btn-outline-danger remove-url" tabindex="-1">×</button>
+            </div>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="add-url">+ Add link</button>
         </div>
         <div class="col-12">
           <div class="form-check form-switch mt-1">
@@ -317,5 +323,22 @@ container.addEventListener('click', e => {
 // ── boot ──────────────────────────────────────────────────────────────────────
 initEmptyRows();
 reindex();
+
+// ── multi-url ─────────────────────────────────────────────────────────────────
+document.getElementById('add-url').addEventListener('click', () => {
+  const row = document.createElement('div');
+  row.className = 'url-row d-flex gap-2 mb-2';
+  row.innerHTML = '<input name="model_url" type="url" class="form-control" placeholder="https://..."><button type="button" class="btn btn-outline-danger remove-url" tabindex="-1">×</button>';
+  document.getElementById('url-rows').appendChild(row);
+  row.querySelector('input').focus();
+});
+
+document.getElementById('url-rows').addEventListener('click', e => {
+  if (e.target.classList.contains('remove-url')) {
+    const rows = document.querySelectorAll('#url-rows .url-row');
+    if (rows.length > 1) e.target.closest('.url-row').remove();
+    else e.target.closest('.url-row').querySelector('input').value = '';
+  }
+});
 </script>
 {% endblock %}
