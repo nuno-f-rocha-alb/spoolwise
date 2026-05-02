@@ -111,6 +111,7 @@ class PrintOrder(db.Model):
     electricity_price_per_kwh = db.Column(Numeric(10, 4), nullable=False)
     printer_power_watts = db.Column(Numeric(10, 2), nullable=False)
     is_internal = db.Column(db.Boolean, nullable=False, default=False)
+    skip_stock_deduction = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     printed_at = db.Column(db.DateTime, nullable=True)
     delivered_at = db.Column(db.DateTime, nullable=True)
@@ -126,6 +127,12 @@ class PrintOrder(db.Model):
         backref="order",
         cascade="all, delete-orphan",
         order_by="OrderLink.position",
+    )
+    files = db.relationship(
+        "OrderFile",
+        backref="order",
+        cascade="all, delete-orphan",
+        order_by="OrderFile.uploaded_at",
     )
 
     @property
@@ -213,6 +220,26 @@ class PrintPlate(db.Model):
     @property
     def total_cost(self):
         return self.filament_cost + self.electricity_cost
+
+
+class OrderFile(db.Model):
+    __tablename__ = "order_files"
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("print_orders.id"), nullable=False)
+    filename = db.Column(db.String(255), nullable=False)       # UUID-based stored name
+    original_name = db.Column(db.String(255), nullable=False)  # original upload filename
+    file_type = db.Column(db.String(10), nullable=False)       # stl, 3mf, png, jpg …
+    is_plate_thumb = db.Column(db.Boolean, nullable=False, default=False)
+    plate_index = db.Column(db.Integer, nullable=True)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def is_viewable_3d(self):
+        return self.file_type in ("stl",)
+
+    @property
+    def is_image(self):
+        return self.file_type in ("png", "jpg", "jpeg", "gif", "webp")
 
 
 class PlateFilament(db.Model):

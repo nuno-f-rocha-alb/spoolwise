@@ -1,28 +1,33 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
+{% set low_stock_count = filaments | selectattr('stock_g', 'le', 100) | list | length %}
 <div class="row g-3 mb-4">
   <div class="col-md-4">
-    <div class="card shadow-sm">
+    <div class="card shadow-sm border-start border-primary border-4">
       <div class="card-body">
-        <h6 class="text-muted mb-1">Total stock</h6>
+        <h6 class="text-muted mb-1 small text-uppercase fw-semibold">Total stock</h6>
         <h3 class="mb-0">{{ '%.2f'|format(total_stock_kg) }} kg</h3>
       </div>
     </div>
   </div>
   <div class="col-md-4">
-    <div class="card shadow-sm">
+    <div class="card shadow-sm border-start border-success border-4">
       <div class="card-body">
-        <h6 class="text-muted mb-1">Inventory value</h6>
+        <h6 class="text-muted mb-1 small text-uppercase fw-semibold">Inventory value</h6>
         <h3 class="mb-0">{{ '%.2f'|format(total_stock_value) }} {{ currency }}</h3>
       </div>
     </div>
   </div>
   <div class="col-md-4">
-    <div class="card shadow-sm">
+    <div class="card shadow-sm border-start {{ 'border-warning' if low_stock_count else 'border-secondary' }} border-4">
       <div class="card-body">
-        <h6 class="text-muted mb-1">Distinct filaments</h6>
-        <h3 class="mb-0">{{ filaments|length }}</h3>
+        <h6 class="text-muted mb-1 small text-uppercase fw-semibold">Distinct filaments</h6>
+        <h3 class="mb-0">{{ filaments|length }}
+          {% if low_stock_count %}
+            <span class="badge bg-warning text-dark fs-6 ms-1" title="{{ low_stock_count }} filament(s) ≤ 100 g">{{ low_stock_count }} low</span>
+          {% endif %}
+        </h3>
       </div>
     </div>
   </div>
@@ -38,14 +43,17 @@
       <div class="table-responsive">
         <table class="table table-sm mb-0">
           <thead><tr><th>Brand</th><th>Material</th><th>Color</th><th class="text-end">Stock</th><th class="text-end">Avg price</th></tr></thead>
+
           <tbody>
           {% for f in filaments %}
-            <tr>
+            <tr{% if f.stock_g <= 0 %} class="table-danger"{% elif f.stock_g <= 100 %} class="table-warning"{% endif %}>
               <td>{{ f.name }}</td>
-              <td>{{ f.material }}</td>
+              <td><span class="badge bg-secondary-subtle text-secondary-emphasis">{{ f.material }}</span></td>
               <td><span class="badge-swatch" style="background-color: {{ f.color_hex or f.color }}"></span>{{ f.color }}</td>
-              <td class="text-end">{{ '%.2f'|format(f.stock_kg) }} kg</td>
-              <td class="text-end">{{ '%.2f'|format(f.avg_price_per_kg) }} {{ currency }}/kg</td>
+              <td class="text-end {% if f.stock_g <= 0 %}text-danger fw-bold{% elif f.stock_g <= 100 %}text-warning fw-semibold{% endif %}">
+                {{ '%.0f'|format(f.stock_g) }} g
+              </td>
+              <td class="text-end text-muted small">{{ '%.2f'|format(f.avg_price_per_kg) }} {{ currency }}/kg</td>
             </tr>
           {% else %}
             <tr><td colspan="5" class="text-center text-muted py-3">No filaments yet. <a href="{{ url_for('main.filament_new') }}">Add one</a>.</td></tr>

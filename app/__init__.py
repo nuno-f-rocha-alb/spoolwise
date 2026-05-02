@@ -51,6 +51,47 @@ def _run_additive_migrations(app):
                 conn.execute(text(f"ALTER TABLE print_plates ADD COLUMN {col_name} {col_spec}"))
                 conn.commit()
 
+        # print_orders.skip_stock_deduction — added for quote / no-stock-check mode
+        result = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = DATABASE() "
+                "AND table_name = 'print_orders' "
+                "AND column_name = 'skip_stock_deduction'"
+            )
+        )
+        if result.scalar() == 0:
+            conn.execute(
+                text(
+                    "ALTER TABLE print_orders "
+                    "ADD COLUMN skip_stock_deduction TINYINT(1) NOT NULL DEFAULT 0"
+                )
+            )
+            conn.commit()
+
+        # order_files — file attachments (STL, 3MF, images) per order
+        result = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = DATABASE() AND table_name = 'order_files'"
+            )
+        )
+        if result.scalar() == 0:
+            conn.execute(text("""
+                CREATE TABLE order_files (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    order_id INT NOT NULL,
+                    filename VARCHAR(255) NOT NULL,
+                    original_name VARCHAR(255) NOT NULL,
+                    file_type VARCHAR(10) NOT NULL,
+                    is_plate_thumb TINYINT(1) NOT NULL DEFAULT 0,
+                    plate_index INT NULL,
+                    uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (order_id) REFERENCES print_orders(id) ON DELETE CASCADE
+                )
+            """))
+            conn.commit()
+
         # filaments.color_hex — added for Bambu color hex support
         result = conn.execute(
             text(
@@ -140,6 +181,10 @@ def create_app():
     )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["BOOTSTRAP_BOOTSWATCH_THEME"] = "flatly"
+    app.config["MAX_CONTENT_LENGTH"] = 150 * 1024 * 1024  # 150 MB max upload
+    upload_dir = os.path.join(app.root_path, "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    app.config["UPLOAD_FOLDER"] = upload_dir
 
     db.init_app(app)
     Bootstrap5(app)

@@ -1,25 +1,53 @@
 {% extends "base.html" %}
 {% block title %}Filament purchase{% endblock %}
 {% block content %}
-<h1 class="h3 mb-1">{{ filament.name }} <small class="text-muted">{{ filament.material }} · {{ filament.color }}</small></h1>
-<p class="text-muted">
-  Current stock: <strong>{{ '%.3f'|format(filament.stock_kg) }} kg</strong> ·
-  Avg price: <strong>{{ '%.2f'|format(filament.avg_price_per_kg) }} {{ currency }}/kg</strong>
-</p>
+<div class="d-flex justify-content-between align-items-center mb-1">
+  <div>
+    <h1 class="h3 mb-0">
+      {{ filament.name }}
+      <small class="text-muted fs-6 fw-normal">{{ filament.material }} ·
+        {% if filament.color_hex %}
+          <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:{{ filament.color_hex }};border:1px solid rgba(128,128,128,.3);vertical-align:middle"></span>
+        {% endif %}
+        {{ filament.color }}
+      </small>
+    </h1>
+    <p class="text-muted mb-0">
+      Current stock: <strong>{{ '%.0f'|format(filament.stock_g) }} g</strong>
+      &nbsp;·&nbsp; Avg price: <strong>{{ '%.2f'|format(filament.avg_price_per_kg) }} {{ currency }}/kg</strong>
+    </p>
+  </div>
+  <a href="{{ url_for('main.filaments_list') }}" class="btn btn-outline-secondary btn-sm">← Back</a>
+</div>
 
-<div class="row g-3">
+<hr class="my-3">
+
+{# ── Section 1: Add purchase (affects weighted average) ── #}
+<div class="row g-4">
   <div class="col-md-5">
+    <h5 class="mb-3">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+           class="me-1 mb-1"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
+        <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+      </svg>
+      Register purchase
+    </h5>
     <form method="post" class="card shadow-sm">
-      <div class="card-header">Add purchase</div>
       <div class="card-body">
         <div class="mb-3">
-          <label class="form-label">Quantity (g)</label>
-          <input name="quantity_g" type="number" step="0.01" min="0.01" class="form-control" required>
+          <label class="form-label fw-medium" for="qty">Quantity (g)</label>
+          <input id="qty" name="quantity_g" type="number" step="0.01" min="0.01"
+                 class="form-control" placeholder="e.g. 1000" required>
         </div>
         <div class="mb-3">
-          <label class="form-label">Price ({{ currency }}/kg)</label>
-          <input name="price_per_kg" type="number" step="0.0001" min="0.0001" class="form-control" required>
-          <div class="form-text">Weighted average is recalculated automatically.</div>
+          <label class="form-label fw-medium" for="price">Price ({{ currency }}/kg)</label>
+          <input id="price" name="price_per_kg" type="number" step="0.0001" min="0.0001"
+                 class="form-control" placeholder="e.g. 13.00" required>
+          <div class="form-text">
+            The weighted average price is recalculated automatically.
+            Current avg: <strong>{{ '%.2f'|format(filament.avg_price_per_kg) }} {{ currency }}/kg</strong>.
+          </div>
         </div>
       </div>
       <div class="card-footer text-end">
@@ -28,42 +56,92 @@
     </form>
   </div>
 
-  <div class="col-md-5">
-    <form method="post" action="{{ url_for('main.filament_adjust', fid=filament.id) }}" class="card shadow-sm border-warning">
-      <div class="card-header bg-warning-subtle">Adjust stock manually</div>
-      <div class="card-body">
-        <div class="mb-2">
-          <label class="form-label">New stock (g)</label>
-          <input name="stock_g" type="number" step="0.01" min="0" class="form-control"
-                 value="{{ '%.2f'|format(filament.stock_g) }}" required>
-          <div class="form-text">Sets the current stock directly. Does not affect the weighted average price.</div>
-        </div>
-      </div>
-      <div class="card-footer text-end">
-        <button class="btn btn-warning">Adjust stock</button>
-      </div>
-    </form>
-  </div>
-
   <div class="col-md-7">
+    <h5 class="mb-3">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+           class="me-1 mb-1"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+      </svg>
+      Purchase history
+    </h5>
     <div class="card shadow-sm">
-      <div class="card-header">Purchase history</div>
       <div class="table-responsive">
         <table class="table table-sm mb-0">
-          <thead><tr><th>Date</th><th class="text-end">Quantity (g)</th><th class="text-end">{{ currency }}/kg</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th class="text-end">Qty (g)</th>
+              <th class="text-end">{{ currency }}/kg</th>
+            </tr>
+          </thead>
           <tbody>
           {% for p in purchases %}
             <tr>
-              <td>{{ p.purchased_at.strftime('%Y-%m-%d %H:%M') }}</td>
-              <td class="text-end">{{ '%.2f'|format(p.quantity_g) }}</td>
+              <td class="text-muted small">{{ p.purchased_at.strftime('%Y-%m-%d %H:%M') }}</td>
+              <td class="text-end">{{ '%.0f'|format(p.quantity_g) }}</td>
               <td class="text-end">{{ '%.2f'|format(p.price_per_kg) }}</td>
             </tr>
           {% else %}
-            <tr><td colspan="3" class="text-center text-muted py-3">No purchases recorded.</td></tr>
+            <tr><td colspan="3" class="text-center text-muted py-3">No purchases recorded yet.</td></tr>
           {% endfor %}
           </tbody>
         </table>
       </div>
+    </div>
+  </div>
+</div>
+
+{# ── Section 2: Adjust (inventory correction only — does NOT touch price average) ── #}
+<div class="row mt-5">
+  <div class="col-12">
+    <div class="d-flex align-items-center gap-2 mb-2">
+      <hr class="flex-grow-1">
+      <span class="text-muted small text-uppercase fw-semibold px-2">Inventory correction</span>
+      <hr class="flex-grow-1">
+    </div>
+  </div>
+  <div class="col-md-5">
+    <div class="card border-warning shadow-sm">
+      <div class="card-header bg-warning-subtle d-flex align-items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <strong>Adjust stock</strong>
+        <span class="badge bg-warning text-dark ms-auto">Does NOT change average price</span>
+      </div>
+      <div class="card-body">
+        <p class="small text-muted mb-3">
+          Use this <strong>only</strong> to correct a counting error in your inventory.
+          This sets the stock directly to the value you enter — it is <em>not</em> a purchase
+          and will <strong>not</strong> affect the weighted average price
+          (currently <strong>{{ '%.2f'|format(filament.avg_price_per_kg) }} {{ currency }}/kg</strong>).
+        </p>
+        <form method="post" action="{{ url_for('main.filament_adjust', fid=filament.id) }}"
+              onsubmit="return confirm('Set stock to ' + document.getElementById('adj-stock').value + ' g? This does not affect the average price.');">
+          <div class="mb-3">
+            <label class="form-label fw-medium" for="adj-stock">New stock value (g)</label>
+            <input id="adj-stock" name="stock_g" type="number" step="0.01" min="0"
+                   class="form-control" value="{{ '%.0f'|format(filament.stock_g) }}" required>
+            <div class="form-text text-warning-emphasis">
+              Enter the <strong>total</strong> amount currently in stock, not the difference.
+            </div>
+          </div>
+          <div class="text-end">
+            <button class="btn btn-warning">Set stock</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-7 d-flex align-items-start pt-2">
+    <div class="alert alert-info small mb-0 w-100">
+      <strong>When to use Adjust vs Purchase?</strong><br>
+      <ul class="mb-0 ps-3 mt-1">
+        <li><strong>Register purchase</strong> — you bought new filament. Updates stock <em>and</em> average price.</li>
+        <li><strong>Adjust stock</strong> — you found a counting error (e.g. weighed the spool). Updates stock only.</li>
+      </ul>
     </div>
   </div>
 </div>

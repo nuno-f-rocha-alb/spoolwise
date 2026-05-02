@@ -1,9 +1,19 @@
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
+import base64
+import os
 import re
+import tempfile
+import uuid
+import xml.etree.ElementTree as ET
+import zipfile
 import requests as http_requests
-from flask import Blueprint, render_template, request, redirect, url_for, flash, abort, jsonify
+from flask import (
+    Blueprint, render_template, request, redirect, url_for,
+    flash, abort, jsonify, send_from_directory, current_app,
+)
+from werkzeug.utils import secure_filename
 
 from .models import (
     db,
@@ -14,6 +24,7 @@ from .models import (
     OrderLink,
     PrintPlate,
     PlateFilament,
+    OrderFile,
 )
 
 
@@ -85,6 +96,142 @@ def _dec(value, default=Decimal(0)):
         return Decimal(str(value).replace(",", "."))
     except InvalidOperation:
         return default
+
+
+_ALLOWED_UPLOAD_EXTS = {"stl", "3mf", "obj", "png", "jpg", "jpeg", "gif", "webp"}
+
+
+def _norm_color(hex_str):
+    """Normalise Bambu #RRGGBBAA → #RRGGBB (strips alpha channel if present)."""
+    h = (hex_str or "").strip()
+    if h.startswith("#") and len(h) == 9:
+        return h[:7]
+    return h if h else "#888888"
+
+
+def _match_filament_db(fil_type, fil_color_hex, filaments):
+    """Best-effort match a 3MF filament type+color to a DB Filament row."""
+    # Strip common brand prefixes ("Bambu PLA Basic" → "PLA Basic")
+    t = fil_type.strip()
+    for prefix in ("Bambu ", "Prusa ", "Generic ", "eSUN ", "Polymaker "):
+        if t.startswith(prefix):
+            t = t[len(prefix):]
+            break
+    t_low = t.lower()
+
+    candidates = [f for f in filaments if f.material.lower() == t_low]
+    if not candidates:
+        candidates = [f for f in filaments
+                      if t_low in f.material.lower() or f.material.lower() in t_low]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Prefer closest colour
+    def _hex_dist(f):
+        if not f.color_hex or not fil_color_hex:
+            return 999999
+        try:
+            h1 = fil_color_hex.lstrip("#")
+            h2 = f.color_hex.lstrip("#")
+            r1, g1, b1 = int(h1[0:2], 16), int(h1[2:4], 16), int(h1[4:6], 16)
+            r2, g2, b2 = int(h2[0:2], 16), int(h2[2:4], 16), int(h2[4:6], 16)
+            return (r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2
+        except Exception:
+            return 999999
+
+    return min(candidates, key=_hex_dist)
+
+
+def _parse_bambu_3mf(zip_path, filaments_db=None):
+    """
+    Parse a Bambu .3mf ZIP.
+    Returns dict:
+      plates: [{index, print_time_hours, filaments:[{type,color,used_g,matched}], thumb_b64}]
+      thumb_b64: overall thumbnail as data-URI or None
+      warning: str or None
+    """
+    result = {"plates": [], "thumb_b64": None, "warning": None}
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            names = set(zf.namelist())
+
+            # Overall thumbnail
+            for t in ("Metadata/thumbnail.png", "Metadata/thumbnail_small.png"):
+                if t in names:
+                    raw = zf.read(t)
+                    result["thumb_b64"] = "data:image/png;base64," + base64.b64encode(raw).decode()
+                    break
+
+            if "Metadata/slice_info.config" not in names:
+                result["warning"] = (
+                    "No Bambu slice data found. "
+                    "Slice the model in Bambu Studio / OrcaSlicer first."
+                )
+                return result
+
+            root = ET.fromstring(zf.read("Metadata/slice_info.config"))
+
+            for plate_el in root.findall("plate"):
+                meta = {m.get("key"): m.get("value")
+                        for m in plate_el.findall("metadata")}
+
+                idx = int(meta.get("index", 1))
+                pred_s = int(float(meta.get("prediction", 0) or 0))
+                print_h = round(pred_s / 3600.0, 4)
+
+                # Per-plate thumbnail
+                thumb_b64 = None
+                for pname in (f"Metadata/plate_{idx}.png",
+                               f"Metadata/plate_{idx:02d}.png"):
+                    if pname in names:
+                        raw = zf.read(pname)
+                        thumb_b64 = "data:image/png;base64," + base64.b64encode(raw).decode()
+                        break
+
+                fils = []
+                for fel in plate_el.findall("filament"):
+                    ftype  = (fel.get("type") or "").strip()
+                    fcolor = _norm_color(fel.get("color") or "")
+                    try:
+                        used_g = round(float(fel.get("used_g") or 0), 2)
+                    except (TypeError, ValueError):
+                        used_g = 0.0
+
+                    matched = None
+                    if filaments_db:
+                        m = _match_filament_db(ftype, fcolor, filaments_db)
+                        if m:
+                            matched = {
+                                "id": m.id,
+                                "brand": m.name,
+                                "material": m.material,
+                                "color": m.color,
+                                "color_hex": m.color_hex or "",
+                            }
+
+                    fils.append({
+                        "type": ftype,
+                        "color": fcolor,
+                        "used_g": used_g,
+                        "matched": matched,
+                    })
+
+                result["plates"].append({
+                    "index": idx,
+                    "print_time_hours": print_h,
+                    "filaments": fils,
+                    "thumb_b64": thumb_b64,
+                })
+
+    except zipfile.BadZipFile:
+        result["warning"] = "Invalid .3mf file (not a valid ZIP archive)."
+    except ET.ParseError as exc:
+        result["warning"] = f"Could not parse slice_info.config: {exc}"
+
+    return result
 
 
 @bp.route("/")
@@ -349,20 +496,22 @@ def order_new():
             flash("Add at least one plate.", "danger")
             return redirect(url_for("main.order_new"))
 
+        skip_stock_check = request.form.get("skip_stock_check") == "1"
+
         # Aggregate stock usage per filament across all plates
         filament_usage: dict = {}
         for _pt, plate_items in plates_data:
             for fid, w in plate_items:
                 filament_usage[fid] = filament_usage.get(fid, Decimal(0)) + w
 
-        # Validate stock for all filaments before touching anything
+        # Validate stock (skipped in quote mode)
         filament_objs: dict = {}
         for fid, total_w in filament_usage.items():
             f = db.session.get(Filament, fid)
             if f is None:
                 flash("Invalid filament.", "danger")
                 return redirect(url_for("main.order_new"))
-            if Decimal(str(f.stock_g or 0)) < total_w:
+            if not skip_stock_check and Decimal(str(f.stock_g or 0)) < total_w:
                 flash(
                     f"Insufficient stock for {f.name} ({f.color}). "
                     f"Available: {f.stock_g} g, total requested: {total_w} g.",
@@ -379,6 +528,7 @@ def order_new():
             model_url=raw_urls[0] if raw_urls else None,
             profit_pct=profit_pct,
             is_internal=is_internal,
+            skip_stock_deduction=skip_stock_check,
             electricity_price_per_kwh=Setting.get("electricity_price_per_kwh"),
             printer_power_watts=Setting.get("printer_power_watts"),
         )
@@ -406,12 +556,16 @@ def order_new():
                     )
                 )
 
-        # Deduct stock after all validation passes
-        for fid, total_w in filament_usage.items():
-            filament_objs[fid].stock_g = Decimal(str(filament_objs[fid].stock_g or 0)) - total_w
+        # Deduct stock only if not in quote mode
+        if not skip_stock_check:
+            for fid, total_w in filament_usage.items():
+                filament_objs[fid].stock_g = Decimal(str(filament_objs[fid].stock_g or 0)) - total_w
 
         db.session.commit()
-        flash("Order created and stock updated.", "success")
+        if skip_stock_check:
+            flash("Order created as quote — no stock deducted.", "success")
+        else:
+            flash("Order created and stock updated.", "success")
         return redirect(url_for("main.order_detail", oid=order.id))
 
     filaments_data = [
@@ -438,6 +592,237 @@ def order_new():
 def order_detail(oid):
     order = PrintOrder.query.get_or_404(oid)
     return render_template("order_detail.html", order=order)
+
+
+@bp.route("/quote/<int:oid>")
+def order_quote(oid):
+    order = PrintOrder.query.get_or_404(oid)
+    return render_template("quote.html", order=order)
+
+
+@bp.route("/orders/<int:oid>/edit", methods=["GET", "POST"])
+def order_edit(oid):
+    order = PrintOrder.query.get_or_404(oid)
+    filaments = Filament.query.order_by(Filament.name).all()
+
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        customer = request.form.get("customer", "").strip() or None
+        notes = request.form.get("notes", "").strip() or None
+        raw_urls = [u.strip() for u in request.form.getlist("model_url") if u.strip()]
+        is_internal = request.form.get("is_internal") == "1"
+        skip_stock_check = request.form.get("skip_stock_check") == "1"
+        profit_pct = _dec(
+            request.form.get("profit_pct"),
+            default=Setting.get("default_profit_pct") or Decimal(30),
+        )
+
+        try:
+            num_plates = int(request.form.get("num_plates", 0))
+        except (ValueError, TypeError):
+            num_plates = 0
+
+        if not name:
+            flash("Name is required.", "danger")
+            return redirect(url_for("main.order_edit", oid=oid))
+
+        if num_plates < 1:
+            flash("Add at least one plate.", "danger")
+            return redirect(url_for("main.order_edit", oid=oid))
+
+        plates_data = []
+        for i in range(num_plates):
+            ph = _dec(request.form.get(f"plate_{i}_hours"))
+            pm = _dec(request.form.get(f"plate_{i}_minutes"))
+            pt = ph + pm / Decimal(60)
+            fids = request.form.getlist(f"plate_{i}_filament_ids")
+            weights = request.form.getlist(f"plate_{i}_weights")
+
+            if pt <= 0:
+                flash(f"Plate {i + 1}: print time must be positive.", "danger")
+                return redirect(url_for("main.order_edit", oid=oid))
+
+            plate_items = []
+            for fid_s, w_s in zip(fids, weights):
+                if not fid_s:
+                    continue
+                w = _dec(w_s)
+                if w <= 0:
+                    continue
+                plate_items.append((int(fid_s), w))
+
+            if not plate_items:
+                flash(f"Plate {i + 1}: add at least one filament with weight > 0.", "danger")
+                return redirect(url_for("main.order_edit", oid=oid))
+
+            plates_data.append((pt, plate_items))
+
+        if not plates_data:
+            flash("Add at least one plate.", "danger")
+            return redirect(url_for("main.order_edit", oid=oid))
+
+        filament_usage: dict = {}
+        for _pt, plate_items in plates_data:
+            for fid, w in plate_items:
+                filament_usage[fid] = filament_usage.get(fid, Decimal(0)) + w
+
+        # Compute how much the original order deducted per filament
+        originally_deducted: dict = {}
+        if not order.skip_stock_deduction:
+            for plate in order.plates:
+                for it in plate.items:
+                    if it.filament is not None:
+                        fid = it.filament_id
+                        originally_deducted[fid] = (
+                            originally_deducted.get(fid, Decimal(0)) + Decimal(str(it.weight_g))
+                        )
+
+        # Validate new stock against effective stock (current + what would be restored)
+        filament_objs: dict = {}
+        for fid, total_w in filament_usage.items():
+            f = db.session.get(Filament, fid)
+            if f is None:
+                flash("Invalid filament.", "danger")
+                return redirect(url_for("main.order_edit", oid=oid))
+            effective_stock = Decimal(str(f.stock_g or 0)) + originally_deducted.get(fid, Decimal(0))
+            if not skip_stock_check and effective_stock < total_w:
+                flash(
+                    f"Insufficient stock for {f.name} ({f.color}). "
+                    f"Available: {effective_stock} g, requested: {total_w} g.",
+                    "danger",
+                )
+                return redirect(url_for("main.order_edit", oid=oid))
+            filament_objs[fid] = f
+
+        # All validation passed — apply changes atomically
+
+        # Restore old stock
+        for fid, deducted in originally_deducted.items():
+            f = db.session.get(Filament, fid)
+            if f is not None:
+                f.stock_g = Decimal(str(f.stock_g or 0)) + deducted
+
+        # Preserve OG data for unchanged URLs
+        old_link_map = {link.url: link for link in order.links}
+
+        # Remove old plates and links
+        for link in list(order.links):
+            db.session.delete(link)
+        for plate in list(order.plates):
+            db.session.delete(plate)
+        db.session.flush()
+
+        # Update order fields
+        order.name = name
+        order.customer = customer
+        order.notes = notes
+        order.model_url = raw_urls[0] if raw_urls else None
+        order.profit_pct = profit_pct
+        order.is_internal = is_internal
+        order.skip_stock_deduction = skip_stock_check
+        order.electricity_price_per_kwh = Setting.get("electricity_price_per_kwh")
+        order.printer_power_watts = Setting.get("printer_power_watts")
+
+        # Add updated links (reuse OG data when URL unchanged)
+        for pos, url in enumerate(raw_urls):
+            if url in old_link_map:
+                old = old_link_map[url]
+                db.session.add(OrderLink(
+                    order_id=order.id, position=pos, url=url,
+                    title=old.title, image=old.image,
+                ))
+            else:
+                title, image = _fetch_og(url)
+                db.session.add(OrderLink(
+                    order_id=order.id, position=pos, url=url,
+                    title=title, image=image,
+                ))
+
+        # Add new plates and filaments
+        for pos, (pt, plate_items) in enumerate(plates_data, start=1):
+            plate = PrintPlate(order_id=order.id, position=pos, print_time_hours=pt)
+            db.session.add(plate)
+            db.session.flush()
+            for fid, w in plate_items:
+                f = filament_objs[fid]
+                db.session.add(
+                    PlateFilament(
+                        plate_id=plate.id,
+                        filament_id=f.id,
+                        weight_g=w,
+                        price_per_kg_snapshot=f.avg_price_per_kg or Decimal(0),
+                    )
+                )
+
+        # Deduct new stock (unless quote mode)
+        if not skip_stock_check:
+            for fid, total_w in filament_usage.items():
+                filament_objs[fid].stock_g = Decimal(str(filament_objs[fid].stock_g or 0)) - total_w
+
+        db.session.commit()
+        flash("Order updated.", "success")
+        return redirect(url_for("main.order_detail", oid=order.id))
+
+    # GET — prepare pre-population data for the edit form
+    filaments_data = [
+        {
+            "id": f.id,
+            "brand": f.name,
+            "material": f.material,
+            "color": f.color,
+            "color_hex": f.color_hex or "",
+            "stock_g": float(f.stock_g),
+            "avg_price": float(f.avg_price_per_kg),
+        }
+        for f in filaments
+    ]
+
+    # Inflate stock display with what the order reserved (so the user sees full available)
+    if not order.skip_stock_deduction:
+        plate_usage: dict = {}
+        for plate in order.plates:
+            for it in plate.items:
+                if it.filament_id:
+                    plate_usage[it.filament_id] = plate_usage.get(it.filament_id, 0.0) + float(it.weight_g)
+        for fd in filaments_data:
+            fd["stock_g"] += plate_usage.get(fd["id"], 0.0)
+
+    edit_order_data = {
+        "name": order.name,
+        "customer": order.customer or "",
+        "notes": order.notes or "",
+        "profit_pct": float(order.profit_pct),
+        "is_internal": order.is_internal,
+        "skip_stock_deduction": order.skip_stock_deduction,
+        "urls": [link.url for link in order.links] or ([order.model_url] if order.model_url else []),
+        "plates": [
+            {
+                "print_time_hours": float(plate.print_time_hours),
+                "filaments": [
+                    {
+                        "filament_id": it.filament_id,
+                        "brand": it.filament.name if it.filament else "",
+                        "material": it.filament.material if it.filament else "",
+                        "color": it.filament.color if it.filament else "",
+                        "weight_g": float(it.weight_g),
+                    }
+                    for it in plate.items
+                    if it.filament
+                ],
+            }
+            for plate in order.plates
+        ],
+    }
+
+    return render_template(
+        "order_form.html",
+        filaments=filaments,
+        filaments_data=filaments_data,
+        default_profit_pct=order.profit_pct,
+        edit_mode=True,
+        order=order,
+        edit_order_data=edit_order_data,
+    )
 
 
 @bp.route("/orders/<int:oid>/printed", methods=["POST"])
@@ -495,14 +880,119 @@ def order_mark_delivered(oid):
 @bp.route("/orders/<int:oid>/delete", methods=["POST"])
 def order_delete(oid):
     order = PrintOrder.query.get_or_404(oid)
-    for plate in order.plates:
-        for it in plate.items:
-            if it.filament is not None:
-                it.filament.stock_g = Decimal(str(it.filament.stock_g or 0)) + Decimal(str(it.weight_g))
+    if not order.skip_stock_deduction:
+        for plate in order.plates:
+            for it in plate.items:
+                if it.filament is not None:
+                    it.filament.stock_g = Decimal(str(it.filament.stock_g or 0)) + Decimal(str(it.weight_g))
     db.session.delete(order)
     db.session.commit()
-    flash("Order deleted and stock restored.", "success")
+    msg = "Order deleted." if order.skip_stock_deduction else "Order deleted and stock restored."
+    flash(msg, "success")
     return redirect(url_for("main.orders_list"))
+
+
+# ---------- Files ----------
+
+@bp.route("/orders/<int:oid>/files", methods=["POST"])
+def order_file_upload(oid):
+    order = PrintOrder.query.get_or_404(oid)
+    f = request.files.get("file")
+    if not f or not f.filename:
+        flash("No file selected.", "warning")
+        return redirect(url_for("main.order_detail", oid=oid))
+
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in _ALLOWED_UPLOAD_EXTS:
+        flash(f"File type .{ext} not supported.", "danger")
+        return redirect(url_for("main.order_detail", oid=oid))
+
+    upload_dir = current_app.config["UPLOAD_FOLDER"]
+    stored = f"{uuid.uuid4()}.{ext}"
+    dest = os.path.join(upload_dir, stored)
+    f.save(dest)
+
+    db.session.add(OrderFile(
+        order_id=oid,
+        filename=stored,
+        original_name=secure_filename(f.filename),
+        file_type=ext,
+    ))
+
+    # For 3MF: extract and persist plate thumbnails
+    if ext == "3mf":
+        parsed = _parse_bambu_3mf(dest)
+        for plate in parsed.get("plates", []):
+            thumb_b64 = plate.get("thumb_b64")
+            if not thumb_b64:
+                continue
+            # Decode and save thumbnail
+            try:
+                header, data = thumb_b64.split(",", 1)
+                thumb_bytes = base64.b64decode(data)
+                thumb_stored = f"{uuid.uuid4()}.png"
+                with open(os.path.join(upload_dir, thumb_stored), "wb") as tf:
+                    tf.write(thumb_bytes)
+                db.session.add(OrderFile(
+                    order_id=oid,
+                    filename=thumb_stored,
+                    original_name=f"plate_{plate['index']}_thumbnail.png",
+                    file_type="png",
+                    is_plate_thumb=True,
+                    plate_index=plate["index"],
+                ))
+            except Exception:
+                pass
+        if parsed.get("warning"):
+            flash(parsed["warning"], "warning")
+
+    db.session.commit()
+    flash("File uploaded.", "success")
+    return redirect(url_for("main.order_detail", oid=oid))
+
+
+@bp.route("/files/<int:fid>")
+def serve_file(fid):
+    f = OrderFile.query.get_or_404(fid)
+    upload_dir = current_app.config["UPLOAD_FOLDER"]
+    return send_from_directory(upload_dir, f.filename, download_name=f.original_name)
+
+
+@bp.route("/files/<int:fid>/delete", methods=["POST"])
+def file_delete(fid):
+    f = OrderFile.query.get_or_404(fid)
+    oid = f.order_id
+    upload_dir = current_app.config["UPLOAD_FOLDER"]
+    try:
+        os.remove(os.path.join(upload_dir, f.filename))
+    except OSError:
+        pass
+    db.session.delete(f)
+    db.session.commit()
+    flash("File deleted.", "success")
+    return redirect(url_for("main.order_detail", oid=oid))
+
+
+@bp.route("/api/parse-3mf", methods=["POST"])
+def api_parse_3mf():
+    f = request.files.get("file")
+    if not f:
+        return jsonify({"error": "No file provided"}), 400
+
+    with tempfile.NamedTemporaryFile(suffix=".3mf", delete=False) as tmp:
+        f.save(tmp.name)
+        tmp_path = tmp.name
+
+    try:
+        filaments_db = Filament.query.order_by(Filament.name).all()
+        result = _parse_bambu_3mf(tmp_path, filaments_db)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    return jsonify(result)
 
 
 # ---------- Statistics ----------

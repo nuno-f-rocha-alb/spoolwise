@@ -1,7 +1,18 @@
 {% extends "base.html" %}
-{% block title %}New order{% endblock %}
+{% block title %}{% if edit_mode %}Edit order — {{ order.name }}{% else %}New order{% endif %}{% endblock %}
 {% block content %}
-<h1 class="h3 mb-3">New order</h1>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">{% if edit_mode %}Edit order{% else %}New order{% endif %}</h1>
+  {% if edit_mode %}
+    <a href="{{ url_for('main.order_detail', oid=order.id) }}" class="btn btn-outline-secondary btn-sm">← Cancel</a>
+  {% endif %}
+</div>
+
+{% if edit_mode and order.status != 'pending' %}
+  <div class="alert alert-warning py-2 small">
+    <strong>Note:</strong> This order is marked as <em>{{ order.status }}</em>. Editing will re-snapshot filament prices from current averages.
+  </div>
+{% endif %}
 
 <form method="post" id="order-form">
   <input type="hidden" name="num_plates" id="num_plates" value="1">
@@ -10,39 +21,48 @@
     <div class="card-body">
       <div class="row g-3">
         <div class="col-md-6">
-          <label class="form-label">Part / project name</label>
-          <input name="name" class="form-control" required>
+          <label class="form-label fw-medium" for="f-name">Part / project name</label>
+          <input id="f-name" name="name" class="form-control" required>
         </div>
         <div class="col-md-6">
-          <label class="form-label">Customer</label>
-          <input name="customer" class="form-control">
+          <label class="form-label fw-medium" for="f-customer">Customer</label>
+          <input id="f-customer" name="customer" class="form-control">
         </div>
-        <div class="col-md-4">
-          <label class="form-label">Profit %</label>
-          <input name="profit_pct" type="number" step="0.01" min="0" class="form-control"
+        <div class="col-md-3">
+          <label class="form-label fw-medium" for="f-profit">Profit %</label>
+          <input id="f-profit" name="profit_pct" type="number" step="0.01" min="0" class="form-control"
                  value="{{ default_profit_pct }}" required>
         </div>
-        <div class="col-md-8">
-          <label class="form-label">Notes</label>
-          <input name="notes" class="form-control">
+        <div class="col-md-9">
+          <label class="form-label fw-medium" for="f-notes">Notes</label>
+          <input id="f-notes" name="notes" class="form-control">
         </div>
         <div class="col-12">
-          <label class="form-label">Model links <span class="text-muted small">(MakerWorld, Printables, Thingiverse…)</span></label>
+          <label class="form-label fw-medium">Model links <span class="text-muted small fw-normal">(MakerWorld, Printables, Thingiverse…)</span></label>
           <div id="url-rows">
             <div class="url-row d-flex gap-2 mb-2">
               <input name="model_url" type="url" class="form-control" placeholder="https://...">
-              <button type="button" class="btn btn-outline-danger remove-url" tabindex="-1">×</button>
+              <button type="button" class="btn btn-outline-danger remove-url" tabindex="-1" aria-label="Remove link">×</button>
             </div>
           </div>
           <button type="button" class="btn btn-sm btn-outline-secondary" id="add-url">+ Add link</button>
         </div>
-        <div class="col-12">
-          <div class="form-check form-switch mt-1">
+
+        <div class="col-12 border-top pt-3">
+          <div class="form-check form-switch">
             <input class="form-check-input" type="checkbox" role="switch"
                    name="is_internal" id="is_internal" value="1">
             <label class="form-check-label" for="is_internal">
               <strong>Personal use</strong>
               <span class="text-muted small ms-1">— not counted toward revenue or profit</span>
+            </label>
+          </div>
+          <div class="form-check form-switch mt-2">
+            <input class="form-check-input" type="checkbox" role="switch"
+                   name="skip_stock_check" id="skip_stock_check" value="1">
+            <label class="form-check-label" for="skip_stock_check">
+              <strong>Quote mode</strong>
+              <span class="text-muted small ms-1">— skip stock validation, no inventory deducted</span>
             </label>
           </div>
         </div>
@@ -52,8 +72,15 @@
 
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h5 class="mb-0">Plates</h5>
-    <button type="button" class="btn btn-sm btn-outline-primary" id="add-plate">+ Add plate</button>
+    <div class="d-flex gap-2">
+      <button type="button" class="btn btn-sm btn-outline-info" id="import-3mf-btn" title="Auto-fill plates from a sliced .3mf file">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="me-1"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Import .3mf
+      </button>
+      <button type="button" class="btn btn-sm btn-outline-primary" id="add-plate">+ Add plate</button>
+    </div>
   </div>
+  <input type="file" id="import-3mf-input" accept=".3mf" class="d-none">
+  <div id="import-3mf-alert" class="d-none"></div>
 
   {% if not filaments %}
     <div class="alert alert-warning">
@@ -65,7 +92,7 @@
     <div class="plate-card card mb-3 border-secondary">
       <div class="card-header d-flex justify-content-between align-items-center bg-body-secondary">
         <span class="plate-label fw-semibold">Plate 1</span>
-        <button type="button" class="btn btn-sm btn-outline-danger remove-plate">× Remove plate</button>
+        <button type="button" class="btn btn-sm btn-outline-danger remove-plate">× Remove</button>
       </div>
       <div class="card-body">
         <div class="row g-3 mb-3">
@@ -74,10 +101,10 @@
             <div class="d-flex align-items-center gap-2">
               <input name="plate_0_hours" type="number" min="0" max="999" placeholder="0"
                      class="form-control plate-hours" style="width:80px" required>
-              <span>h</span>
+              <span class="text-muted">h</span>
               <input name="plate_0_minutes" type="number" min="0" max="59" placeholder="0"
                      class="form-control plate-minutes" style="width:80px" required>
-              <span>m</span>
+              <span class="text-muted">m</span>
             </div>
           </div>
         </div>
@@ -93,8 +120,13 @@
   </div>
 
   <div class="d-flex justify-content-between mt-3">
-    <a href="{{ url_for('main.orders_list') }}" class="btn btn-link">Cancel</a>
-    <button class="btn btn-primary">Create order</button>
+    {% if edit_mode %}
+      <a href="{{ url_for('main.order_detail', oid=order.id) }}" class="btn btn-link text-secondary">Cancel</a>
+      <button class="btn btn-primary">Save changes</button>
+    {% else %}
+      <a href="{{ url_for('main.orders_list') }}" class="btn btn-link text-secondary">Cancel</a>
+      <button class="btn btn-primary">Create order</button>
+    {% endif %}
   </div>
 </form>
 
@@ -102,7 +134,7 @@
   <div class="plate-card card mb-3 border-secondary">
     <div class="card-header d-flex justify-content-between align-items-center bg-body-secondary">
       <span class="plate-label fw-semibold">Plate N</span>
-      <button type="button" class="btn btn-sm btn-outline-danger remove-plate">× Remove plate</button>
+      <button type="button" class="btn btn-sm btn-outline-danger remove-plate">× Remove</button>
     </div>
     <div class="card-body">
       <div class="row g-3 mb-3">
@@ -111,10 +143,10 @@
           <div class="d-flex align-items-center gap-2">
             <input type="number" min="0" max="999" placeholder="0"
                    class="form-control plate-hours" style="width:80px" required>
-            <span>h</span>
+            <span class="text-muted">h</span>
             <input type="number" min="0" max="59" placeholder="0"
                    class="form-control plate-minutes" style="width:80px" required>
-            <span>m</span>
+            <span class="text-muted">m</span>
           </div>
         </div>
       </div>
@@ -133,6 +165,7 @@
 {% block scripts %}
 <script>
 const FILAMENTS = {{ filaments_data | tojson }};
+const EDIT_ORDER = {{ edit_order_data | tojson if edit_order_data is defined else 'null' }};
 const CUR = '{{ currency }}';
 
 const BRANDS = [...new Set(FILAMENTS.map(f => f.brand))].sort();
@@ -165,14 +198,13 @@ function buildFilRow() {
         <input type="number" step="0.01" min="0.01" class="form-control form-control-sm fil-weight" required>
       </div>
       <div class="col-md-1">
-        <button type="button" class="btn btn-outline-danger btn-sm w-100 remove-filament">×</button>
+        <button type="button" class="btn btn-outline-danger btn-sm w-100 remove-filament" aria-label="Remove filament">×</button>
       </div>
     </div>
     <div class="fil-stock-info text-muted small mt-1 ps-1 d-none"></div>
     <input type="hidden" class="fil-id-hidden">
   `;
 
-  // populate brand
   const brandSel = wrap.querySelector('.fil-brand');
   brandSel.innerHTML = '<option value="">— brand —</option>';
   BRANDS.forEach(b => {
@@ -181,7 +213,6 @@ function buildFilRow() {
     brandSel.appendChild(o);
   });
 
-  // events
   brandSel.addEventListener('change', () => onBrandChange(wrap));
   wrap.querySelector('.fil-material').addEventListener('change', () => onMaterialChange(wrap));
   wrap.querySelector('.fil-color').addEventListener('change', () => onColorChange(wrap));
@@ -191,9 +222,9 @@ function buildFilRow() {
 
 // ── cascade handlers ──────────────────────────────────────────────────────────
 function onBrandChange(row) {
-  const brand   = row.querySelector('.fil-brand').value;
-  const matSel  = row.querySelector('.fil-material');
-  const colSel  = row.querySelector('.fil-color');
+  const brand  = row.querySelector('.fil-brand').value;
+  const matSel = row.querySelector('.fil-material');
+  const colSel = row.querySelector('.fil-color');
 
   const materials = [...new Set(
     FILAMENTS.filter(f => f.brand === brand).map(f => f.material)
@@ -254,7 +285,8 @@ function onColorChange(row) {
     const stock = parseFloat(opt.dataset.stock || 0);
     const price = parseFloat(opt.dataset.price || 0);
     swatch.style.background = hex || '#9e9e9e';
-    info.innerHTML = `<span class="badge bg-secondary-subtle text-secondary-emphasis me-1">Stock: ${stock.toFixed(0)} g</span><span class="badge bg-secondary-subtle text-secondary-emphasis">${price.toFixed(2)} ${CUR}/kg</span>`;
+    const stockBadgeClass = stock <= 0 ? 'bg-danger-subtle text-danger-emphasis' : 'bg-secondary-subtle text-secondary-emphasis';
+    info.innerHTML = `<span class="badge ${stockBadgeClass} me-1">Stock: ${stock.toFixed(0)} g${stock <= 0 ? ' ⚠ none' : ''}</span><span class="badge bg-secondary-subtle text-secondary-emphasis">${price.toFixed(2)} ${CUR}/kg</span>`;
     info.classList.remove('d-none');
   } else {
     swatch.style.background = '#9e9e9e';
@@ -262,7 +294,7 @@ function onColorChange(row) {
   }
 }
 
-// ── reindex: assign names to hidden inputs and weight inputs ──────────────────
+// ── reindex ───────────────────────────────────────────────────────────────────
 function reindex() {
   const plates = container.querySelectorAll('.plate-card');
   document.getElementById('num_plates').value = plates.length;
@@ -275,7 +307,7 @@ function reindex() {
   });
 }
 
-// ── init existing empty fil-row placeholders ──────────────────────────────────
+// ── init empty placeholder rows ───────────────────────────────────────────────
 function initEmptyRows() {
   document.querySelectorAll('.fil-row').forEach(placeholder => {
     if (!placeholder.querySelector('.fil-brand')) {
@@ -283,6 +315,78 @@ function initEmptyRows() {
       placeholder.replaceWith(built);
     }
   });
+}
+
+// ── pre-fill a fil-row from edit data ─────────────────────────────────────────
+function buildPrefilledFilRow(filData) {
+  const row = buildFilRow();
+
+  const brandSel = row.querySelector('.fil-brand');
+  brandSel.value = filData.brand;
+  onBrandChange(row);
+
+  const matSel = row.querySelector('.fil-material');
+  matSel.value = filData.material;
+  onMaterialChange(row);
+
+  const colSel = row.querySelector('.fil-color');
+  colSel.value = String(filData.filament_id);
+  onColorChange(row);
+
+  row.querySelector('.fil-weight').value = filData.weight_g;
+  return row;
+}
+
+// ── add a plate card pre-filled from edit data ────────────────────────────────
+function addPrefilledPlate(plateData) {
+  const clone = tmpl.content.cloneNode(true);
+  container.appendChild(clone);
+
+  const cards = container.querySelectorAll('.plate-card');
+  const card  = cards[cards.length - 1];
+
+  const totalH = plateData.print_time_hours;
+  card.querySelector('.plate-hours').value   = Math.floor(totalH);
+  card.querySelector('.plate-minutes').value = Math.round((totalH % 1) * 60);
+
+  const filRows = card.querySelector('.filament-rows');
+  filRows.innerHTML = '';
+
+  plateData.filaments.forEach(fd => {
+    filRows.appendChild(buildPrefilledFilRow(fd));
+  });
+}
+
+// ── init from edit order data ─────────────────────────────────────────────────
+function initFromEditOrder(ed) {
+  // Basic fields
+  document.getElementById('f-name').value     = ed.name;
+  document.getElementById('f-customer').value = ed.customer;
+  document.getElementById('f-notes').value    = ed.notes;
+  document.getElementById('f-profit').value   = ed.profit_pct;
+  if (ed.is_internal)          document.getElementById('is_internal').checked     = true;
+  if (ed.skip_stock_deduction) document.getElementById('skip_stock_check').checked = true;
+
+  // URLs
+  const urlRows = document.getElementById('url-rows');
+  urlRows.innerHTML = '';
+  const urls = ed.urls && ed.urls.length ? ed.urls : [''];
+  urls.forEach((url, i) => {
+    const row = document.createElement('div');
+    row.className = 'url-row d-flex gap-2 mb-2';
+    row.innerHTML = `<input name="model_url" type="url" class="form-control" placeholder="https://..." value="${escHtml(url)}"><button type="button" class="btn btn-outline-danger remove-url" tabindex="-1" aria-label="Remove link">×</button>`;
+    urlRows.appendChild(row);
+  });
+
+  // Plates
+  container.innerHTML = '';
+  ed.plates.forEach(plateData => addPrefilledPlate(plateData));
+
+  reindex();
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // ── plate + filament add/remove ───────────────────────────────────────────────
@@ -306,8 +410,7 @@ container.addEventListener('click', e => {
   }
   if (e.target.classList.contains('add-filament')) {
     const rows = e.target.closest('.plate-card').querySelector('.filament-rows');
-    const newRow = buildFilRow();
-    rows.appendChild(newRow);
+    rows.appendChild(buildFilRow());
     reindex();
     return;
   }
@@ -321,14 +424,18 @@ container.addEventListener('click', e => {
 });
 
 // ── boot ──────────────────────────────────────────────────────────────────────
-initEmptyRows();
-reindex();
+if (EDIT_ORDER) {
+  initFromEditOrder(EDIT_ORDER);
+} else {
+  initEmptyRows();
+  reindex();
+}
 
 // ── multi-url ─────────────────────────────────────────────────────────────────
 document.getElementById('add-url').addEventListener('click', () => {
   const row = document.createElement('div');
   row.className = 'url-row d-flex gap-2 mb-2';
-  row.innerHTML = '<input name="model_url" type="url" class="form-control" placeholder="https://..."><button type="button" class="btn btn-outline-danger remove-url" tabindex="-1">×</button>';
+  row.innerHTML = '<input name="model_url" type="url" class="form-control" placeholder="https://..."><button type="button" class="btn btn-outline-danger remove-url" tabindex="-1" aria-label="Remove link">×</button>';
   document.getElementById('url-rows').appendChild(row);
   row.querySelector('input').focus();
 });
@@ -338,6 +445,103 @@ document.getElementById('url-rows').addEventListener('click', e => {
     const rows = document.querySelectorAll('#url-rows .url-row');
     if (rows.length > 1) e.target.closest('.url-row').remove();
     else e.target.closest('.url-row').querySelector('input').value = '';
+  }
+});
+
+// ── 3MF import ────────────────────────────────────────────────────────────────
+const importBtn   = document.getElementById('import-3mf-btn');
+const importInput = document.getElementById('import-3mf-input');
+const importAlert = document.getElementById('import-3mf-alert');
+
+function show3MFAlert(msg, type) {
+  importAlert.className = `alert alert-${type} py-2 small mt-2`;
+  importAlert.textContent = msg;
+  importAlert.classList.remove('d-none');
+}
+
+function hide3MFAlert() {
+  importAlert.classList.add('d-none');
+}
+
+function initFrom3MF(data) {
+  if (!data.plates || !data.plates.length) {
+    show3MFAlert(data.warning || 'No plate data found in this .3mf file.', 'warning');
+    return;
+  }
+
+  container.innerHTML = '';
+  const unmatched = [];
+
+  data.plates.forEach(plate => {
+    const plateData = {
+      print_time_hours: plate.print_time_hours || 0,
+      filaments: [],
+    };
+
+    (plate.filaments || []).forEach(fil => {
+      if (fil.matched) {
+        plateData.filaments.push({
+          brand:       fil.matched.brand,
+          material:    fil.matched.material,
+          filament_id: fil.matched.id,
+          weight_g:    fil.used_g,
+        });
+      } else {
+        unmatched.push(`${fil.type} (${fil.color}, ${fil.used_g}g) — plate ${plate.index}`);
+        plateData.filaments.push({ brand: '', material: '', filament_id: '', weight_g: fil.used_g });
+      }
+    });
+
+    if (!plateData.filaments.length) {
+      plateData.filaments.push({ brand: '', material: '', filament_id: '', weight_g: 0 });
+    }
+
+    addPrefilledPlate(plateData);
+
+    // Inject thumbnail into the plate card header
+    if (plate.thumb_b64) {
+      const cards = container.querySelectorAll('.plate-card');
+      const card  = cards[cards.length - 1];
+      const img = document.createElement('img');
+      img.src = plate.thumb_b64;
+      img.alt = `Plate ${plate.index}`;
+      img.style.cssText = 'height:38px;width:auto;border-radius:4px;border:1px solid rgba(128,128,128,.25);margin-left:auto;';
+      card.querySelector('.card-header').appendChild(img);
+    }
+  });
+
+  reindex();
+  hide3MFAlert();
+
+  const msgs = [];
+  if (data.warning)      msgs.push(data.warning);
+  if (unmatched.length)  msgs.push(`${unmatched.length} filament(s) not matched — select manually:\n• ${unmatched.join('\n• ')}`);
+  if (msgs.length)       show3MFAlert(msgs.join('\n\n'), 'warning');
+}
+
+importBtn.addEventListener('click', () => importInput.click());
+
+importInput.addEventListener('change', async () => {
+  const file = importInput.files[0];
+  if (!file) return;
+
+  importBtn.disabled = true;
+  importBtn.textContent = 'Parsing…';
+  hide3MFAlert();
+
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res  = await fetch('/api/parse-3mf', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.error) { show3MFAlert(data.error, 'danger'); return; }
+    initFrom3MF(data);
+  } catch (err) {
+    show3MFAlert('Failed to parse .3mf file: ' + err.message, 'danger');
+  } finally {
+    importBtn.disabled = false;
+    importBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="me-1"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Import .3mf';
+    importInput.value = '';
   }
 });
 </script>

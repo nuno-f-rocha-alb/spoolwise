@@ -8,13 +8,22 @@
       {% if order.is_internal %}
         <span class="badge bg-warning text-dark fs-6 align-middle ms-1">Personal use</span>
       {% endif %}
+      {% if order.skip_stock_deduction %}
+        <span class="badge bg-info text-dark fs-6 align-middle ms-1">Quote</span>
+      {% endif %}
     </h1>
     <div class="text-muted small">
       {{ order.created_at.strftime('%Y-%m-%d %H:%M') }}
       {% if order.customer %} · Customer: {{ order.customer }}{% endif %}
     </div>
   </div>
-  <a href="{{ url_for('main.orders_list') }}" class="btn btn-outline-secondary">← Back</a>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('main.order_quote', oid=order.id) }}" class="btn btn-outline-success" target="_blank">
+      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="me-1 mb-1"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>Quote
+    </a>
+    <a href="{{ url_for('main.order_edit', oid=order.id) }}" class="btn btn-outline-primary">Edit order</a>
+    <a href="{{ url_for('main.orders_list') }}" class="btn btn-outline-secondary">← Back</a>
+  </div>
 </div>
 
 <div class="row g-3">
@@ -97,6 +106,90 @@
         </div>
       </a>
     {% endfor %}
+
+    {# ── Files ──────────────────────────────────────────────────────── #}
+    <div class="card shadow-sm mt-1">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Files{% if order.files %}<span class="badge bg-secondary ms-1">{{ order.files|length }}</span>{% endif %}</span>
+        <button class="btn btn-sm btn-outline-primary" type="button"
+                data-bs-toggle="collapse" data-bs-target="#files-upload-panel">
+          + Upload
+        </button>
+      </div>
+
+      <div class="collapse" id="files-upload-panel">
+        <div class="card-body border-bottom pb-3">
+          <form method="post" action="{{ url_for('main.order_file_upload', oid=order.id) }}"
+                enctype="multipart/form-data">
+            <div class="d-flex gap-2 align-items-center">
+              <input type="file" name="file" class="form-control form-control-sm"
+                     accept=".stl,.3mf,.obj,.png,.jpg,.jpeg,.gif,.webp" required>
+              <button class="btn btn-sm btn-primary text-nowrap">Upload</button>
+            </div>
+            <div class="text-muted small mt-1">STL, 3MF, OBJ, PNG, JPG · 3MF plate thumbnails extracted automatically</div>
+          </form>
+        </div>
+      </div>
+
+      {# plate thumbnails extracted from 3MF #}
+      {% set plate_thumbs = order.files | selectattr('is_plate_thumb') | list %}
+      {% if plate_thumbs %}
+      <div class="card-body border-bottom py-2">
+        <div class="text-muted small mb-2">Plate thumbnails</div>
+        <div class="d-flex flex-wrap gap-2">
+          {% for f in plate_thumbs %}
+          <div class="text-center">
+            <a href="{{ url_for('main.serve_file', fid=f.id) }}" target="_blank">
+              <img src="{{ url_for('main.serve_file', fid=f.id) }}"
+                   class="rounded border" style="height:72px;width:auto;object-fit:cover;" alt="">
+            </a>
+            <div class="text-muted" style="font-size:0.7rem;margin-top:2px;">Plate {{ f.plate_index }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      {# regular uploaded files #}
+      {% set regular_files = order.files | rejectattr('is_plate_thumb') | list %}
+      {% if regular_files %}
+      <ul class="list-group list-group-flush">
+        {% for f in regular_files %}
+        <li class="list-group-item d-flex justify-content-between align-items-center py-2">
+          <a href="{{ url_for('main.serve_file', fid=f.id) }}"
+             class="text-truncate me-2" style="max-width:220px;" title="{{ f.original_name }}">
+            {{ f.original_name }}
+          </a>
+          <div class="d-flex gap-1 align-items-center flex-shrink-0">
+            <span class="badge bg-secondary-subtle text-secondary-emphasis text-uppercase">{{ f.file_type }}</span>
+            {% if f.is_viewable_3d %}
+            <button type="button" class="btn btn-sm btn-outline-info view-stl-btn"
+                    data-file-url="{{ url_for('main.serve_file', fid=f.id) }}"
+                    data-file-name="{{ f.original_name }}">3D</button>
+            {% endif %}
+            <form method="post" action="{{ url_for('main.file_delete', fid=f.id) }}" class="d-inline"
+                  onsubmit="return confirm('Delete {{ f.original_name }}?');">
+              <button class="btn btn-sm btn-outline-danger" aria-label="Delete">×</button>
+            </form>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% elif not plate_thumbs %}
+      <div class="card-body text-muted small text-center py-3">No files attached.</div>
+      {% endif %}
+    </div>
+
+    {# STL 3D viewer (hidden until a file's "3D" button is clicked) #}
+    <div class="card shadow-sm mt-1 d-none" id="stl-viewer-card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span id="stl-viewer-title">3D Viewer</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="stl-viewer-close">Close</button>
+      </div>
+      <div class="card-body p-0" style="background:#1a1a2e;border-radius:0 0 .375rem .375rem;">
+        <canvas id="stl-canvas" style="width:100%;height:380px;display:block;border-radius:0 0 .375rem .375rem;"></canvas>
+      </div>
+    </div>
 
     {% if order.notes %}
       <div class="card shadow-sm mt-1">
@@ -238,6 +331,89 @@ document.querySelectorAll('.plate-card').forEach(card => {
       location.reload();
     });
   }
+});
+</script>
+
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+
+let renderer, scene, camera, controls;
+
+function initViewer(canvas) {
+  const w = canvas.clientWidth || 600, h = canvas.clientHeight || 380;
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setSize(w, h, false);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0x1a1a2e);
+
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 50000);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir.position.set(1, 2, 3);
+  scene.add(dir);
+  const dir2 = new THREE.DirectionalLight(0xaaaaff, 0.3);
+  dir2.position.set(-2, -1, -1);
+  scene.add(dir2);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+
+  (function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); })();
+
+  window.addEventListener('resize', () => {
+    const w2 = canvas.clientWidth, h2 = canvas.clientHeight;
+    camera.aspect = w2 / h2;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w2, h2, false);
+  });
+}
+
+function loadSTL(url) {
+  const loader = new STLLoader();
+  loader.load(url, geo => {
+    scene.children.filter(c => c.isMesh).forEach(m => { scene.remove(m); m.geometry.dispose(); });
+    geo.computeBoundingBox();
+    const center = new THREE.Vector3();
+    geo.boundingBox.getCenter(center);
+    geo.translate(-center.x, -center.y, -center.z);
+    const size = new THREE.Vector3();
+    geo.boundingBox.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    camera.position.set(0, maxDim * 0.6, maxDim * 1.6);
+    camera.near = maxDim * 0.001;
+    camera.far  = maxDim * 20;
+    camera.updateProjectionMatrix();
+    controls.target.set(0, 0, 0);
+    controls.update();
+    const mat = new THREE.MeshPhongMaterial({ color: 0x2196f3, specular: 0x444444, shininess: 50 });
+    scene.add(new THREE.Mesh(geo, mat));
+  });
+}
+
+function openViewer(url, name) {
+  const card   = document.getElementById('stl-viewer-card');
+  const canvas = document.getElementById('stl-canvas');
+  document.getElementById('stl-viewer-title').textContent = name || '3D Viewer';
+  card.classList.remove('d-none');
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  if (!renderer) initViewer(canvas);
+  loadSTL(url);
+}
+
+document.getElementById('stl-viewer-close')?.addEventListener('click', () => {
+  document.getElementById('stl-viewer-card').classList.add('d-none');
+});
+
+document.querySelectorAll('.view-stl-btn').forEach(btn => {
+  btn.addEventListener('click', () => openViewer(btn.dataset.fileUrl, btn.dataset.fileName));
 });
 </script>
 {% endblock %}

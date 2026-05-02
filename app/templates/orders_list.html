@@ -49,6 +49,9 @@
             {% if o.is_internal %}
               <span class="badge bg-warning text-dark ms-1">Personal</span>
             {% endif %}
+            {% if o.skip_stock_deduction %}
+              <span class="badge bg-info text-dark ms-1">Quote</span>
+            {% endif %}
           </td>
           <td>{{ o.customer or '—' }}</td>
           <td>{{ o.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
@@ -71,10 +74,16 @@
             {% endif %}
           </td>
           <td class="text-end">
-            <form method="post" action="{{ url_for('main.order_delete', oid=o.id) }}" class="d-inline"
-                  onsubmit="return confirm('Delete order and restore stock?');">
-              <button class="btn btn-sm btn-outline-danger">Delete</button>
-            </form>
+            <div class="d-flex gap-1 justify-content-end">
+              <a href="{{ url_for('main.order_quote', oid=o.id) }}" class="btn btn-sm btn-outline-success" target="_blank" title="View quote">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+              </a>
+              <a href="{{ url_for('main.order_edit', oid=o.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+              <form method="post" action="{{ url_for('main.order_delete', oid=o.id) }}" class="d-inline"
+                    onsubmit="return confirm('Delete order and restore stock?');">
+                <button class="btn btn-sm btn-outline-danger">Delete</button>
+              </form>
+            </div>
           </td>
         </tr>
       {% else %}

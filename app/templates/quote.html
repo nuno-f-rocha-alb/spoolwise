@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quote — {{ order.name }}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/flatly/bootstrap.min.css">
+  <style>
+    body { background: #f0f4f8; }
+    .quote-card { max-width: 680px; margin: 0 auto; }
+    .price-box {
+      background: linear-gradient(135deg, #2c3e50 0%, #18bc9c 100%);
+      border-radius: 12px;
+      color: #fff;
+    }
+    .model-img {
+      width: 100%;
+      max-height: 320px;
+      object-fit: cover;
+      border-radius: 10px;
+    }
+    .stat-pill {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 0.65rem 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .stat-pill .label { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: #64748b; }
+    .stat-pill .value { font-size: 1.1rem; font-weight: 600; color: #1e293b; }
+    .quote-footer { font-size: .78rem; color: #94a3b8; }
+    @media print {
+      body { background: #fff; }
+      .no-print { display: none !important; }
+      .quote-card { max-width: 100%; }
+    }
+  </style>
+</head>
+<body class="py-5 px-3">
+
+  <div class="quote-card">
+
+    {# ── header ── #}
+    <div class="d-flex justify-content-between align-items-start mb-4">
+      <div>
+        <div class="text-muted small fw-semibold text-uppercase letter-spacing-1">3D Print Quote</div>
+        <div class="text-muted small mt-1"># {{ order.id }} &nbsp;·&nbsp; {{ order.created_at.strftime('%d %b %Y') }}</div>
+      </div>
+      <div class="text-end no-print">
+        <button onclick="window.print()" class="btn btn-outline-secondary btn-sm me-1">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="me-1"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Print
+        </button>
+        <a href="{{ url_for('main.order_detail', oid=order.id) }}" class="btn btn-outline-secondary btn-sm">← Internal view</a>
+      </div>
+    </div>
+
+    {# ── project title + customer ── #}
+    <div class="mb-4">
+      <h1 class="h2 fw-bold mb-1" style="color:#1e293b">{{ order.name }}</h1>
+      {% if order.customer %}
+        <p class="text-muted mb-0">Prepared for <strong>{{ order.customer }}</strong></p>
+      {% endif %}
+    </div>
+
+    {# ── model image (first link with image) ── #}
+    {% set cover = namespace(img=none, url=none, title=none) %}
+    {% for link in order.links %}
+      {% if link.image and cover.img is none %}
+        {% set cover.img   = link.image %}
+        {% set cover.url   = link.url %}
+        {% set cover.title = link.title %}
+      {% endif %}
+    {% endfor %}
+
+    {% if cover.img %}
+      <div class="mb-4">
+        {% if cover.url %}
+          <a href="{{ cover.url }}" target="_blank" rel="noopener">
+        {% endif %}
+        <img src="{{ cover.img }}" alt="{{ cover.title or order.name }}" class="model-img shadow-sm">
+        {% if cover.url %}</a>{% endif %}
+        {% if cover.title %}
+          <div class="text-muted small mt-1">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            {{ cover.title }}
+          </div>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    {# ── stats row ── #}
+    <div class="row g-2 mb-4">
+      <div class="col-4">
+        <div class="stat-pill">
+          <span class="label">Print time</span>
+          <span class="value">{{ order.total_print_time_hours | duration }}</span>
+        </div>
+      </div>
+      <div class="col-4">
+        <div class="stat-pill">
+          <span class="label">Plates</span>
+          <span class="value">{{ order.plates | length }}</span>
+        </div>
+      </div>
+      <div class="col-4">
+        <div class="stat-pill">
+          <span class="label">Status</span>
+          <span class="value">
+            {% if order.status == 'delivered' %}Delivered
+            {% elif order.status == 'printed' %}Ready
+            {% else %}Pending{% endif %}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    {# ── price box ── #}
+    {% if not order.is_internal %}
+    <div class="price-box p-4 mb-4 shadow-sm">
+      <div class="d-flex justify-content-between align-items-center">
+        <div>
+          <div style="font-size:.8rem;opacity:.75;text-transform:uppercase;letter-spacing:.06em">Total price</div>
+          <div style="font-size:2.2rem;font-weight:700;line-height:1.1">{{ '%.2f'|format(order.sell_price) }} {{ currency }}</div>
+        </div>
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.35"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      </div>
+    </div>
+    {% endif %}
+
+    {# ── notes ── #}
+    {% if order.notes %}
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-body">
+        <div class="text-muted small text-uppercase fw-semibold mb-2" style="letter-spacing:.06em">Notes</div>
+        <p class="mb-0" style="white-space:pre-wrap;color:#334155">{{ order.notes }}</p>
+      </div>
+    </div>
+    {% endif %}
+
+    {# ── extra model links ── #}
+    {% set extra_links = order.links | selectattr('url') | list %}
+    {% if extra_links | length > 1 %}
+    <div class="mb-4">
+      <div class="text-muted small text-uppercase fw-semibold mb-2" style="letter-spacing:.06em">Model references</div>
+      {% for link in extra_links %}
+        <a href="{{ link.url }}" target="_blank" rel="noopener"
+           class="d-flex align-items-center gap-2 text-decoration-none mb-2 p-2 rounded border bg-white">
+          {% if link.image %}
+            <img src="{{ link.image }}" width="40" height="40" style="object-fit:cover;border-radius:4px" alt="">
+          {% endif %}
+          <span class="small text-truncate text-dark">{{ link.title or link.url }}</span>
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ms-auto flex-shrink-0 text-muted"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {# ── footer ── #}
+    <div class="quote-footer text-center mt-5 pt-3 border-top">
+      Generated with Spoolwise &nbsp;·&nbsp; {{ order.created_at.strftime('%d %b %Y') }}
+    </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
