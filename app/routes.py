@@ -955,6 +955,10 @@ def order_file_upload(oid):
 def serve_file(fid):
     f = OrderFile.query.get_or_404(fid)
     upload_dir = current_app.config["UPLOAD_FOLDER"]
+    # Images (including plate thumbnails) must be served inline so <img> tags render them.
+    # Only non-image files get download_name (which sets Content-Disposition).
+    if f.is_image or f.is_plate_thumb:
+        return send_from_directory(upload_dir, f.filename)
     return send_from_directory(upload_dir, f.filename, download_name=f.original_name)
 
 

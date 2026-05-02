@@ -110,7 +110,8 @@
     {# ── Files ──────────────────────────────────────────────────────── #}
     <div class="card shadow-sm mt-1">
       <div class="card-header d-flex justify-content-between align-items-center">
-        <span>Files{% if order.files %}<span class="badge bg-secondary ms-1">{{ order.files|length }}</span>{% endif %}</span>
+        {% set upload_count = order.files | rejectattr('is_plate_thumb') | list | length %}
+        <span>Files{% if upload_count %}<span class="badge bg-secondary ms-1">{{ upload_count }}</span>{% endif %}</span>
         <button class="btn btn-sm btn-outline-primary" type="button"
                 data-bs-toggle="collapse" data-bs-target="#files-upload-panel">
           + Upload
