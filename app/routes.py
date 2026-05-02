@@ -963,11 +963,21 @@ def file_delete(fid):
     f = OrderFile.query.get_or_404(fid)
     oid = f.order_id
     upload_dir = current_app.config["UPLOAD_FOLDER"]
-    try:
-        os.remove(os.path.join(upload_dir, f.filename))
-    except OSError:
-        pass
-    db.session.delete(f)
+
+    to_delete = [f]
+
+    # Deleting a .3mf also removes its extracted plate thumbnails
+    if f.file_type == "3mf":
+        thumbs = OrderFile.query.filter_by(order_id=oid, is_plate_thumb=True).all()
+        to_delete.extend(thumbs)
+
+    for entry in to_delete:
+        try:
+            os.remove(os.path.join(upload_dir, entry.filename))
+        except OSError:
+            pass
+        db.session.delete(entry)
+
     db.session.commit()
     flash("File deleted.", "success")
     return redirect(url_for("main.order_detail", oid=oid))
