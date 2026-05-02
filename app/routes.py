@@ -155,6 +155,117 @@ def _xml_iter(el, local_name):
     return [c for c in el.iter() if _local(c.tag) == local_name]
 
 
+def _3mf_to_stl_bytes(zip_path):
+    """
+    Extract all mesh geometry from a .3mf ZIP and return binary STL bytes.
+    Handles component references and build-item transforms.
+    Returns None if no geometry found.
+    """
+    import struct
+
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        names = set(zf.namelist())
+        names_ci = {n.lower(): n for n in names}
+
+        def _read(path):
+            if path in names:
+                return zf.read(path)
+            key = names_ci.get(path.lower())
+            return zf.read(key) if key else None
+
+        # Locate the main model file via relationships
+        model_path = "3D/3dmodel.model"
+        rels_raw = _read("_rels/.rels")
+        if rels_raw:
+            try:
+                for rel in _xml_iter(ET.fromstring(rels_raw), "Relationship"):
+                    if "3dmodel" in (rel.get("Type") or "").lower():
+                        t = rel.get("Target", "").lstrip("/")
+                        if t:
+                            model_path = t
+                            break
+            except ET.ParseError:
+                pass
+
+        model_raw = _read(model_path)
+        if not model_raw:
+            return None
+
+        root = ET.fromstring(model_raw)
+
+        # Parse every <object> into {id: (verts, tris)}
+        objects = {}
+        for obj in _xml_iter(root, "object"):
+            oid = obj.get("id")
+            mesh_els = _xml_iter(obj, "mesh")
+            if not mesh_els:
+                continue
+            mesh = mesh_els[0]
+            verts = [
+                (float(v.get("x", 0)), float(v.get("y", 0)), float(v.get("z", 0)))
+                for v in _xml_iter(mesh, "vertex")
+            ]
+            tris = [
+                (int(t.get("v1", 0)), int(t.get("v2", 0)), int(t.get("v3", 0)))
+                for t in _xml_iter(mesh, "triangle")
+            ]
+            objects[oid] = (verts, tris)
+
+        def _apply_transform(verts, transform_str):
+            if not transform_str:
+                return verts
+            try:
+                m = [float(x) for x in transform_str.split()]
+                if len(m) != 12:
+                    return verts
+                return [
+                    (m[0]*x + m[3]*y + m[6]*z + m[9],
+                     m[1]*x + m[4]*y + m[7]*z + m[10],
+                     m[2]*x + m[5]*y + m[8]*z + m[11])
+                    for x, y, z in verts
+                ]
+            except (ValueError, IndexError):
+                return verts
+
+        all_tris = []
+
+        def _collect(oid, transform_str=None):
+            if oid not in objects:
+                return
+            verts, tris = objects[oid]
+            if transform_str:
+                verts = _apply_transform(verts, transform_str)
+            for v1, v2, v3 in tris:
+                if v1 < len(verts) and v2 < len(verts) and v3 < len(verts):
+                    all_tris.append((verts[v1], verts[v2], verts[v3]))
+
+        # Process build items (with optional per-item transforms)
+        build_items = _xml_iter(root, "item")
+        if build_items:
+            for item in build_items:
+                _collect(item.get("objectid"), item.get("transform"))
+        else:
+            for oid in objects:
+                _collect(oid)
+
+        if not all_tris:
+            return None
+
+        # Encode as binary STL
+        buf = bytearray(b"\x00" * 80)           # header
+        buf += struct.pack("<I", len(all_tris))  # triangle count
+        for (x1, y1, z1), (x2, y2, z2), (x3, y3, z3) in all_tris:
+            ax, ay, az = x2 - x1, y2 - y1, z2 - z1
+            bx, by, bz = x3 - x1, y3 - y1, z3 - z1
+            nx, ny, nz = ay*bz - az*by, az*bx - ax*bz, ax*by - ay*bx
+            buf += struct.pack("<fff", nx, ny, nz)
+            buf += struct.pack("<fff", x1, y1, z1)
+            buf += struct.pack("<fff", x2, y2, z2)
+            buf += struct.pack("<fff", x3, y3, z3)
+            buf += struct.pack("<H", 0)
+        return bytes(buf)
+
+
 def _parse_bambu_3mf(zip_path, filaments_db=None):
     """
     Parse a Bambu .3mf ZIP.
@@ -1116,6 +1227,20 @@ def serve_file(fid):
     if f.is_image or f.is_plate_thumb or f.file_type in ("stl", "3mf"):
         return send_from_directory(upload_dir, f.filename)
     return send_from_directory(upload_dir, f.filename, download_name=f.original_name)
+
+
+@bp.route("/files/<int:fid>/stl")
+def serve_file_as_stl(fid):
+    """Convert a .3mf to binary STL on-the-fly for the 3D viewer."""
+    from flask import Response
+    f = OrderFile.query.get_or_404(fid)
+    if f.file_type != "3mf":
+        abort(400)
+    path = os.path.join(current_app.config["UPLOAD_FOLDER"], f.filename)
+    stl_bytes = _3mf_to_stl_bytes(path)
+    if not stl_bytes:
+        abort(404)
+    return Response(stl_bytes, mimetype="application/octet-stream")
 
 
 @bp.route("/files/<int:fid>/delete", methods=["POST"])
