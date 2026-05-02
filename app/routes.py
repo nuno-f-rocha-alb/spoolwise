@@ -214,6 +214,9 @@ def _parse_bambu_3mf(zip_path, filaments_db=None):
                     if raw:
                         thumb_b64 = "data:image/png;base64," + base64.b64encode(raw).decode()
                         break
+                # Fallback to project thumbnail
+                if thumb_b64 is None:
+                    thumb_b64 = result["thumb_b64"]
 
                 fils = []
                 for fel in _xml_iter(plate_el, "filament"):
@@ -317,6 +320,9 @@ def _parse_bambu_3mf(zip_path, filaments_db=None):
                             if raw:
                                 thumb_b64 = "data:image/png;base64," + base64.b64encode(raw).decode()
                                 break
+                        # Fallback to project thumbnail
+                        if thumb_b64 is None:
+                            thumb_b64 = result["thumb_b64"]
 
                         fils = []
                         for slot in sorted(used_slots):
@@ -1077,8 +1083,8 @@ def order_file_upload(oid):
                     is_plate_thumb=True,
                     plate_index=plate["index"],
                 ))
-            except Exception:
-                pass
+            except Exception as exc:
+                current_app.logger.warning("plate thumbnail save failed: %s", exc)
         if parsed.get("warning"):
             flash(parsed["warning"], "warning")
 

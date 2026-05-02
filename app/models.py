@@ -235,7 +235,7 @@ class OrderFile(db.Model):
 
     @property
     def is_viewable_3d(self):
-        return self.file_type in ("stl",)
+        return self.file_type in ("stl", "3mf")
 
     @property
     def is_image(self):

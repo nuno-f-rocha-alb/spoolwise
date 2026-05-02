@@ -166,7 +166,8 @@
             {% if f.is_viewable_3d %}
             <button type="button" class="btn btn-sm btn-outline-info view-stl-btn"
                     data-file-url="{{ url_for('main.serve_file', fid=f.id) }}"
-                    data-file-name="{{ f.original_name }}">3D</button>
+                    data-file-name="{{ f.original_name }}"
+                    data-file-type="{{ f.file_type }}">3D</button>
             {% endif %}
             <form method="post" action="{{ url_for('main.file_delete', fid=f.id) }}" class="d-inline"
                   onsubmit="return confirm('Delete {{ f.original_name }}?');">
@@ -342,8 +343,9 @@ document.querySelectorAll('.plate-card').forEach(card => {
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js';
 
-let renderer, scene, camera, controls;
+let renderer, scene, camera, controls, loadedObject = null;
 
 function initViewer(canvas) {
   const w = canvas.clientWidth || 600, h = canvas.clientHeight || 380;
@@ -377,36 +379,67 @@ function initViewer(canvas) {
   });
 }
 
+function clearScene() {
+  if (loadedObject) {
+    scene.remove(loadedObject);
+    loadedObject.traverse(c => { if (c.geometry) c.geometry.dispose(); });
+    loadedObject = null;
+  }
+}
+
+function fitCamera(object) {
+  const box = new THREE.Box3().setFromObject(object);
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  object.position.sub(center);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  camera.position.set(0, maxDim * 0.6, maxDim * 1.6);
+  camera.near = maxDim * 0.001;
+  camera.far  = maxDim * 20;
+  camera.updateProjectionMatrix();
+  controls.target.set(0, 0, 0);
+  controls.update();
+}
+
 function loadSTL(url) {
+  clearScene();
   const loader = new STLLoader();
   loader.load(url, geo => {
-    scene.children.filter(c => c.isMesh).forEach(m => { scene.remove(m); m.geometry.dispose(); });
     geo.computeBoundingBox();
     const center = new THREE.Vector3();
     geo.boundingBox.getCenter(center);
     geo.translate(-center.x, -center.y, -center.z);
-    const size = new THREE.Vector3();
-    geo.boundingBox.getSize(size);
-    const maxDim = Math.max(size.x, size.y, size.z) || 1;
-    camera.position.set(0, maxDim * 0.6, maxDim * 1.6);
-    camera.near = maxDim * 0.001;
-    camera.far  = maxDim * 20;
-    camera.updateProjectionMatrix();
-    controls.target.set(0, 0, 0);
-    controls.update();
     const mat = new THREE.MeshPhongMaterial({ color: 0x2196f3, specular: 0x444444, shininess: 50 });
-    scene.add(new THREE.Mesh(geo, mat));
+    loadedObject = new THREE.Mesh(geo, mat);
+    scene.add(loadedObject);
+    fitCamera(loadedObject);
   });
 }
 
-function openViewer(url, name) {
+function load3MF(url) {
+  clearScene();
+  const loader = new ThreeMFLoader();
+  loader.load(url, object => {
+    loadedObject = object;
+    scene.add(loadedObject);
+    fitCamera(loadedObject);
+  });
+}
+
+function openViewer(url, name, fileType) {
   const card   = document.getElementById('stl-viewer-card');
   const canvas = document.getElementById('stl-canvas');
   document.getElementById('stl-viewer-title').textContent = name || '3D Viewer';
   card.classList.remove('d-none');
   card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   if (!renderer) initViewer(canvas);
-  loadSTL(url);
+  if (fileType === '3mf') {
+    load3MF(url);
+  } else {
+    loadSTL(url);
+  }
 }
 
 document.getElementById('stl-viewer-close')?.addEventListener('click', () => {
@@ -414,7 +447,7 @@ document.getElementById('stl-viewer-close')?.addEventListener('click', () => {
 });
 
 document.querySelectorAll('.view-stl-btn').forEach(btn => {
-  btn.addEventListener('click', () => openViewer(btn.dataset.fileUrl, btn.dataset.fileName));
+  btn.addEventListener('click', () => openViewer(btn.dataset.fileUrl, btn.dataset.fileName, btn.dataset.fileType));
 });
 </script>
 {% endblock %}
