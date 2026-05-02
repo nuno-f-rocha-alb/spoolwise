@@ -144,6 +144,16 @@ def _match_filament_db(fil_type, fil_color_hex, filaments):
     return min(candidates, key=_hex_dist)
 
 
+def _local(tag):
+    """Strip XML namespace prefix, e.g. '{http://...}plate' → 'plate'."""
+    return tag.split("}", 1)[1] if "}" in tag else tag
+
+
+def _xml_iter(el, local_name):
+    """Iterate all descendants of el whose local tag name matches local_name."""
+    return [c for c in el.iter() if _local(c.tag) == local_name]
+
+
 def _parse_bambu_3mf(zip_path, filaments_db=None):
     """
     Parse a Bambu .3mf ZIP.
@@ -156,43 +166,56 @@ def _parse_bambu_3mf(zip_path, filaments_db=None):
 
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
-            names = set(zf.namelist())
+            # Case-insensitive lookup of ZIP entries
+            names_ci = {n.lower(): n for n in zf.namelist()}
+            names    = set(zf.namelist())
+
+            def _read(path):
+                """Read a ZIP entry; tries exact path then case-insensitive."""
+                if path in names:
+                    return zf.read(path)
+                key = names_ci.get(path.lower())
+                return zf.read(key) if key else None
 
             # Overall thumbnail
             for t in ("Metadata/thumbnail.png", "Metadata/thumbnail_small.png"):
-                if t in names:
-                    raw = zf.read(t)
+                raw = _read(t)
+                if raw:
                     result["thumb_b64"] = "data:image/png;base64," + base64.b64encode(raw).decode()
                     break
 
-            if "Metadata/slice_info.config" not in names:
+            slice_raw = _read("Metadata/slice_info.config")
+            if slice_raw is None:
                 result["warning"] = (
                     "No Bambu slice data found. "
                     "Slice the model in Bambu Studio / OrcaSlicer first."
                 )
                 return result
 
-            root = ET.fromstring(zf.read("Metadata/slice_info.config"))
+            root = ET.fromstring(slice_raw)
 
-            for plate_el in root.findall("plate"):
+            # Use namespace-agnostic, depth-agnostic search so the parser works
+            # regardless of XML namespace declarations or nesting differences
+            # across Bambu Studio / OrcaSlicer versions.
+            for plate_el in _xml_iter(root, "plate"):
                 meta = {m.get("key"): m.get("value")
-                        for m in plate_el.findall("metadata")}
+                        for m in _xml_iter(plate_el, "metadata")}
 
-                idx = int(meta.get("index", 1))
+                idx    = int(meta.get("index", 1))
                 pred_s = int(float(meta.get("prediction", 0) or 0))
                 print_h = round(pred_s / 3600.0, 4)
 
-                # Per-plate thumbnail
+                # Per-plate thumbnail (try both zero-padded and plain index)
                 thumb_b64 = None
                 for pname in (f"Metadata/plate_{idx}.png",
-                               f"Metadata/plate_{idx:02d}.png"):
-                    if pname in names:
-                        raw = zf.read(pname)
+                              f"Metadata/plate_{idx:02d}.png"):
+                    raw = _read(pname)
+                    if raw:
                         thumb_b64 = "data:image/png;base64," + base64.b64encode(raw).decode()
                         break
 
                 fils = []
-                for fel in plate_el.findall("filament"):
+                for fel in _xml_iter(plate_el, "filament"):
                     ftype  = (fel.get("type") or "").strip()
                     fcolor = _norm_color(fel.get("color") or "")
                     try:
@@ -225,6 +248,12 @@ def _parse_bambu_3mf(zip_path, filaments_db=None):
                     "filaments": fils,
                     "thumb_b64": thumb_b64,
                 })
+
+            if not result["plates"]:
+                result["warning"] = (
+                    "slice_info.config found but no plate data could be extracted. "
+                    "Try re-slicing in Bambu Studio and export again."
+                )
 
     except zipfile.BadZipFile:
         result["warning"] = "Invalid .3mf file (not a valid ZIP archive)."
