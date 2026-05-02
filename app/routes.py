@@ -808,16 +808,18 @@ def order_edit(oid):
             for fid, w in plate_items:
                 filament_usage[fid] = filament_usage.get(fid, Decimal(0)) + w
 
-        # Compute how much the original order deducted per filament
+        # Compute how much the original order currently has deducted from stock.
+        # Skipped plates already had their stock restored on skip, so exclude them.
         originally_deducted: dict = {}
         if not order.skip_stock_deduction:
             for plate in order.plates:
-                for it in plate.items:
-                    if it.filament is not None:
-                        fid = it.filament_id
-                        originally_deducted[fid] = (
-                            originally_deducted.get(fid, Decimal(0)) + Decimal(str(it.weight_g))
-                        )
+                if not plate.is_skipped:
+                    for it in plate.items:
+                        if it.filament is not None:
+                            fid = it.filament_id
+                            originally_deducted[fid] = (
+                                originally_deducted.get(fid, Decimal(0)) + Decimal(str(it.weight_g))
+                            )
 
         # Validate new stock against effective stock (current + what would be restored)
         filament_objs: dict = {}
@@ -1000,6 +1002,17 @@ def plate_toggle_skipped(oid, pid):
     plate.is_skipped = not plate.is_skipped
     if plate.is_skipped:
         plate.printed_at = None
+
+    # Restore stock when skipping, deduct again when unskipping
+    if not plate.order.skip_stock_deduction:
+        for it in plate.items:
+            if it.filament is not None:
+                delta = Decimal(str(it.weight_g))
+                if plate.is_skipped:
+                    it.filament.stock_g = Decimal(str(it.filament.stock_g or 0)) + delta
+                else:
+                    it.filament.stock_g = Decimal(str(it.filament.stock_g or 0)) - delta
+
     _sync_order_printed(plate.order)
     db.session.commit()
     order = plate.order
@@ -1024,9 +1037,10 @@ def order_delete(oid):
     order = PrintOrder.query.get_or_404(oid)
     if not order.skip_stock_deduction:
         for plate in order.plates:
-            for it in plate.items:
-                if it.filament is not None:
-                    it.filament.stock_g = Decimal(str(it.filament.stock_g or 0)) + Decimal(str(it.weight_g))
+            if not plate.is_skipped:  # skipped plates were already restored on skip
+                for it in plate.items:
+                    if it.filament is not None:
+                        it.filament.stock_g = Decimal(str(it.filament.stock_g or 0)) + Decimal(str(it.weight_g))
     db.session.delete(order)
     db.session.commit()
     msg = "Order deleted." if order.skip_stock_deduction else "Order deleted and stock restored."
