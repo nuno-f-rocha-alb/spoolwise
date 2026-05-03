@@ -292,6 +292,28 @@ def _3mf_to_stl_bytes(zip_path, plate_n=None):
             except (ValueError, IndexError):
                 return verts
 
+        def _compose_transforms(outer_str, inner_str):
+            """Compose two 3MF 3x4 column-major transforms: apply inner first, then outer."""
+            if not inner_str:
+                return outer_str
+            if not outer_str:
+                return inner_str
+            try:
+                o = [float(x) for x in outer_str.split()]
+                i = [float(x) for x in inner_str.split()]
+                if len(o) != 12 or len(i) != 12:
+                    return outer_str
+                r = [0.0] * 12
+                for col in range(3):
+                    for row in range(3):
+                        for k in range(3):
+                            r[col*3 + row] += o[k*3 + row] * i[col*3 + k]
+                for row in range(3):
+                    r[9 + row] = sum(o[k*3 + row] * i[9 + k] for k in range(3)) + o[9 + row]
+                return " ".join(str(x) for x in r)
+            except (ValueError, IndexError):
+                return outer_str
+
         all_tris = []
 
         def _collect(oid, transform_str=None):
@@ -304,7 +326,9 @@ def _3mf_to_stl_bytes(zip_path, plate_n=None):
                         all_tris.append((verts[v1], verts[v2], verts[v3]))
             elif oid in assembly:
                 for comp in assembly[oid]:
-                    _collect(comp["objectid"], comp.get("transform") or transform_str)
+                    # Compose outer (build item) and inner (component) transforms so
+                    # objects land at their correct world-space positions.
+                    _collect(comp["objectid"], _compose_transforms(transform_str, comp.get("transform")))
 
         build_items = _xml_iter(root, "item")
         if build_items:
