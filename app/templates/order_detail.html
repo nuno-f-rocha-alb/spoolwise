@@ -396,22 +396,32 @@ function clearScene() {
     loadedObject.traverse(c => { if (c.geometry) c.geometry.dispose(); });
     loadedObject = null;
   }
+  const oldGrid = scene.getObjectByName('floor-grid');
+  if (oldGrid) { oldGrid.geometry.dispose(); scene.remove(oldGrid); }
 }
 
 function fitCamera(object) {
   const box = new THREE.Box3().setFromObject(object);
-  const center = new THREE.Vector3();
-  box.getCenter(center);
-  object.position.sub(center);
   const size = new THREE.Vector3();
   box.getSize(size);
   const maxDim = Math.max(size.x, size.y, size.z) || 1;
-  camera.position.set(0, maxDim * 0.6, maxDim * 1.6);
+
+  // Front view: camera along +Z with slight elevation
+  camera.position.set(0, maxDim * 0.4, maxDim * 2.0);
   camera.near = maxDim * 0.001;
-  camera.far  = maxDim * 20;
+  camera.far  = maxDim * 40;
   camera.updateProjectionMatrix();
   controls.target.set(0, 0, 0);
   controls.update();
+
+  // Large grid at the base of the model — feels "infinite"
+  const footprint = maxDim * 10;
+  const grid = new THREE.GridHelper(footprint, 40, 0x4444aa, 0x222244);
+  grid.name = 'floor-grid';
+  grid.position.y = box.min.y;
+  grid.material.transparent = true;
+  grid.material.opacity = 0.55;
+  scene.add(grid);
 }
 
 function loadSTL(url) {
@@ -424,6 +434,8 @@ function loadSTL(url) {
     geo.translate(-center.x, -center.y, -center.z);
     const mat = new THREE.MeshPhongMaterial({ color: 0x2196f3, specular: 0x444444, shininess: 50 });
     loadedObject = new THREE.Mesh(geo, mat);
+    // 3MF/Bambu uses Z-up; rotate -90° around X so models stand upright in Three.js (Y-up)
+    loadedObject.rotation.x = -Math.PI / 2;
     scene.add(loadedObject);
     fitCamera(loadedObject);
   });
