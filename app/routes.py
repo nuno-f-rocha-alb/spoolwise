@@ -665,6 +665,14 @@ def settings():
         )
         currency = request.form.get("currency_symbol", "€").strip() or "€"
         Setting.set("currency_symbol", currency)
+        Setting.set(
+            "retail_mode_enabled",
+            "true" if request.form.get("retail_mode_enabled") == "1" else "false",
+        )
+        Setting.set(
+            "default_vat_rate_pct",
+            _dec(request.form.get("default_vat_rate_pct"), default=Decimal("23")),
+        )
         db.session.commit()
         flash("Settings saved.", "success")
         return redirect(url_for("main.settings"))
@@ -675,6 +683,8 @@ def settings():
         printer_power_watts=Setting.get("printer_power_watts"),
         default_profit_pct=Setting.get("default_profit_pct"),
         currency_symbol=Setting.get("currency_symbol", cast=str) or "€",
+        retail_mode_enabled=Setting.get_bool("retail_mode_enabled"),
+        default_vat_rate_pct=Setting.get("default_vat_rate_pct") or Decimal("23"),
     )
 
 
@@ -863,6 +873,7 @@ def order_new():
     filaments = Filament.query.filter_by(user_id=current_user.id).order_by(Filament.name).all()
 
     if request.method == "POST":
+        retail_on = Setting.get_bool("retail_mode_enabled")
         name = request.form.get("name", "").strip()
         customer = request.form.get("customer", "").strip() or None
         notes = request.form.get("notes", "").strip() or None
@@ -873,6 +884,20 @@ def order_new():
             request.form.get("profit_pct"),
             default=Setting.get("default_profit_pct") or Decimal(30),
         )
+
+        try:
+            quantity = max(1, int(request.form.get("quantity", 1) or 1))
+        except (ValueError, TypeError):
+            quantity = 1
+
+        # VAT only applicable in retail mode AND for non-personal orders
+        has_vat = retail_on and not is_internal and request.form.get("has_vat") == "1"
+        vat_rate_pct = None
+        if has_vat:
+            vat_rate_pct = _dec(
+                request.form.get("vat_rate_pct"),
+                default=Setting.get("default_vat_rate_pct") or Decimal("23"),
+            )
 
         try:
             num_plates = int(request.form.get("num_plates", 0))
@@ -921,26 +946,27 @@ def order_new():
 
         skip_stock_check = request.form.get("skip_stock_check") == "1"
 
-        # Aggregate stock usage per filament across all plates
+        # Aggregate stock usage per filament across all plates × quantity
+        qty_dec = Decimal(quantity)
         filament_usage: dict = {}
         for _pt, plate_items in plates_data:
             for fid, w in plate_items:
-                filament_usage[fid] = filament_usage.get(fid, Decimal(0)) + w
+                filament_usage[fid] = filament_usage.get(fid, Decimal(0)) + w * qty_dec
 
-        # Validate stock (skipped in quote mode)
+        # Resolve filaments and collect stock warnings (warn-but-allow policy)
         filament_objs: dict = {}
+        stock_warnings: list = []
         for fid, total_w in filament_usage.items():
             f = Filament.query.filter_by(id=fid, user_id=current_user.id).first()
             if f is None:
                 flash("Invalid filament.", "danger")
                 return redirect(url_for("main.order_new"))
             if not skip_stock_check and Decimal(str(f.stock_g or 0)) < total_w:
-                flash(
-                    f"Insufficient stock for {f.name} ({f.color}). "
-                    f"Available: {f.stock_g} g, total requested: {total_w} g.",
-                    "danger",
+                short = total_w - Decimal(str(f.stock_g or 0))
+                stock_warnings.append(
+                    f"{f.name} {f.material} {f.color}: requested {total_w} g, "
+                    f"in stock {f.stock_g} g (short by {short} g)"
                 )
-                return redirect(url_for("main.order_new"))
             filament_objs[fid] = f
 
         # Create order
@@ -953,6 +979,9 @@ def order_new():
             profit_pct=profit_pct,
             is_internal=is_internal,
             skip_stock_deduction=skip_stock_check,
+            quantity=quantity,
+            has_vat=has_vat,
+            vat_rate_pct=vat_rate_pct,
             electricity_price_per_kwh=Setting.get("electricity_price_per_kwh"),
             printer_power_watts=Setting.get("printer_power_watts"),
         )
@@ -990,6 +1019,12 @@ def order_new():
             flash("Order created as quote — no stock deducted.", "success")
         else:
             flash("Order created and stock updated.", "success")
+        if stock_warnings and not skip_stock_check:
+            flash(
+                "Stock went negative for: " + "; ".join(stock_warnings)
+                + ". Adjust inventory after the next purchase.",
+                "warning",
+            )
         return redirect(url_for("main.order_detail", oid=order.id))
 
     filaments_data = [
@@ -1009,6 +1044,7 @@ def order_new():
         filaments=filaments,
         filaments_data=filaments_data,
         default_profit_pct=Setting.get("default_profit_pct"),
+        default_vat_rate_pct=Setting.get("default_vat_rate_pct") or Decimal("23"),
     )
 
 
@@ -1026,6 +1062,46 @@ def order_quote(oid):
     return render_template("quote.html", order=order)
 
 
+@bp.route("/quote/combined")
+@login_required
+def order_quote_combined():
+    raw_ids = request.args.get("ids", "")
+    try:
+        ids = [int(x) for x in raw_ids.split(",") if x.strip()]
+    except ValueError:
+        ids = []
+    if not ids:
+        flash("Select at least one order to combine.", "warning")
+        return redirect(url_for("main.orders_list"))
+
+    orders = (
+        PrintOrder.query
+        .filter(PrintOrder.user_id == current_user.id, PrintOrder.id.in_(ids))
+        .order_by(PrintOrder.created_at.asc())
+        .all()
+    )
+    if not orders:
+        abort(404)
+
+    # Aggregate totals
+    subtotal = sum((o.sell_price for o in orders if not o.is_internal), Decimal(0))
+    vat_total = sum((o.vat_amount for o in orders if not o.is_internal), Decimal(0))
+    total = subtotal + vat_total
+    has_any_vat = any(o.has_vat and not o.is_internal for o in orders)
+    vat_rates = sorted({Decimal(str(o.vat_rate_pct)) for o in orders
+                        if o.has_vat and not o.is_internal and o.vat_rate_pct is not None})
+
+    return render_template(
+        "quote_combined.html",
+        orders=orders,
+        subtotal=subtotal,
+        vat_total=vat_total,
+        total=total,
+        has_any_vat=has_any_vat,
+        vat_rates=vat_rates,
+    )
+
+
 @bp.route("/orders/<int:oid>/edit", methods=["GET", "POST"])
 @login_required
 def order_edit(oid):
@@ -1033,6 +1109,7 @@ def order_edit(oid):
     filaments = Filament.query.filter_by(user_id=current_user.id).order_by(Filament.name).all()
 
     if request.method == "POST":
+        retail_on = Setting.get_bool("retail_mode_enabled")
         name = request.form.get("name", "").strip()
         customer = request.form.get("customer", "").strip() or None
         notes = request.form.get("notes", "").strip() or None
@@ -1043,6 +1120,19 @@ def order_edit(oid):
             request.form.get("profit_pct"),
             default=Setting.get("default_profit_pct") or Decimal(30),
         )
+
+        try:
+            quantity = max(1, int(request.form.get("quantity", 1) or 1))
+        except (ValueError, TypeError):
+            quantity = 1
+
+        has_vat = retail_on and not is_internal and request.form.get("has_vat") == "1"
+        vat_rate_pct = None
+        if has_vat:
+            vat_rate_pct = _dec(
+                request.form.get("vat_rate_pct"),
+                default=Setting.get("default_vat_rate_pct") or Decimal("23"),
+            )
 
         try:
             num_plates = int(request.form.get("num_plates", 0))
@@ -1088,13 +1178,16 @@ def order_edit(oid):
             flash("Add at least one plate.", "danger")
             return redirect(url_for("main.order_edit", oid=oid))
 
+        qty_dec = Decimal(quantity)
         filament_usage: dict = {}
         for _pt, plate_items in plates_data:
             for fid, w in plate_items:
-                filament_usage[fid] = filament_usage.get(fid, Decimal(0)) + w
+                filament_usage[fid] = filament_usage.get(fid, Decimal(0)) + w * qty_dec
 
         # Compute how much the original order currently has deducted from stock.
+        # Uses the OLD quantity (whatever it was when the previous deduction ran).
         # Skipped plates already had their stock restored on skip, so exclude them.
+        old_qty = Decimal(int(order.quantity or 1))
         originally_deducted: dict = {}
         if not order.skip_stock_deduction:
             for plate in order.plates:
@@ -1103,11 +1196,12 @@ def order_edit(oid):
                         if it.filament is not None:
                             fid = it.filament_id
                             originally_deducted[fid] = (
-                                originally_deducted.get(fid, Decimal(0)) + Decimal(str(it.weight_g))
+                                originally_deducted.get(fid, Decimal(0)) + Decimal(str(it.weight_g)) * old_qty
                             )
 
-        # Validate new stock against effective stock (current + what would be restored)
+        # Resolve filaments and collect stock warnings (warn-but-allow policy)
         filament_objs: dict = {}
+        stock_warnings: list = []
         for fid, total_w in filament_usage.items():
             f = Filament.query.filter_by(id=fid, user_id=current_user.id).first()
             if f is None:
@@ -1115,12 +1209,11 @@ def order_edit(oid):
                 return redirect(url_for("main.order_edit", oid=oid))
             effective_stock = Decimal(str(f.stock_g or 0)) + originally_deducted.get(fid, Decimal(0))
             if not skip_stock_check and effective_stock < total_w:
-                flash(
-                    f"Insufficient stock for {f.name} ({f.color}). "
-                    f"Available: {effective_stock} g, requested: {total_w} g.",
-                    "danger",
+                short = total_w - effective_stock
+                stock_warnings.append(
+                    f"{f.name} {f.material} {f.color}: requested {total_w} g, "
+                    f"available {effective_stock} g (short by {short} g)"
                 )
-                return redirect(url_for("main.order_edit", oid=oid))
             filament_objs[fid] = f
 
         # All validation passed — apply changes atomically
@@ -1149,6 +1242,9 @@ def order_edit(oid):
         order.profit_pct = profit_pct
         order.is_internal = is_internal
         order.skip_stock_deduction = skip_stock_check
+        order.quantity = quantity
+        order.has_vat = has_vat
+        order.vat_rate_pct = vat_rate_pct
         order.electricity_price_per_kwh = Setting.get("electricity_price_per_kwh")
         order.printer_power_watts = Setting.get("printer_power_watts")
 
@@ -1190,6 +1286,12 @@ def order_edit(oid):
 
         db.session.commit()
         flash("Order updated.", "success")
+        if stock_warnings and not skip_stock_check:
+            flash(
+                "Stock went negative for: " + "; ".join(stock_warnings)
+                + ". Adjust inventory after the next purchase.",
+                "warning",
+            )
         return redirect(url_for("main.order_detail", oid=order.id))
 
     # GET — prepare pre-population data for the edit form
@@ -1208,11 +1310,12 @@ def order_edit(oid):
 
     # Inflate stock display with what the order reserved (so the user sees full available)
     if not order.skip_stock_deduction:
+        old_qty_f = float(order.quantity or 1)
         plate_usage: dict = {}
         for plate in order.plates:
             for it in plate.items:
                 if it.filament_id:
-                    plate_usage[it.filament_id] = plate_usage.get(it.filament_id, 0.0) + float(it.weight_g)
+                    plate_usage[it.filament_id] = plate_usage.get(it.filament_id, 0.0) + float(it.weight_g) * old_qty_f
         for fd in filaments_data:
             fd["stock_g"] += plate_usage.get(fd["id"], 0.0)
 
@@ -1223,6 +1326,9 @@ def order_edit(oid):
         "profit_pct": float(order.profit_pct),
         "is_internal": order.is_internal,
         "skip_stock_deduction": order.skip_stock_deduction,
+        "quantity": int(order.quantity or 1),
+        "has_vat": bool(order.has_vat),
+        "vat_rate_pct": float(order.vat_rate_pct) if order.vat_rate_pct is not None else None,
         "urls": [link.url for link in order.links] or ([order.model_url] if order.model_url else []),
         "plates": [
             {
@@ -1248,6 +1354,7 @@ def order_edit(oid):
         filaments=filaments,
         filaments_data=filaments_data,
         default_profit_pct=order.profit_pct,
+        default_vat_rate_pct=order.vat_rate_pct or Setting.get("default_vat_rate_pct") or Decimal("23"),
         edit_mode=True,
         order=order,
         edit_order_data=edit_order_data,
@@ -1291,11 +1398,12 @@ def plate_toggle_skipped(oid, pid):
     if plate.is_skipped:
         plate.printed_at = None
 
-    # Restore stock when skipping, deduct again when unskipping
+    # Restore stock when skipping, deduct again when unskipping (× quantity)
     if not plate.order.skip_stock_deduction:
+        qty = Decimal(int(plate.order.quantity or 1))
         for it in plate.items:
             if it.filament is not None:
-                delta = Decimal(str(it.weight_g))
+                delta = Decimal(str(it.weight_g)) * qty
                 if plate.is_skipped:
                     it.filament.stock_g = Decimal(str(it.filament.stock_g or 0)) + delta
                 else:
@@ -1326,11 +1434,15 @@ def order_mark_delivered(oid):
 def order_delete(oid):
     order = _user_order_or_404(oid)
     if not order.skip_stock_deduction:
+        qty = Decimal(int(order.quantity or 1))
         for plate in order.plates:
             if not plate.is_skipped:  # skipped plates were already restored on skip
                 for it in plate.items:
                     if it.filament is not None:
-                        it.filament.stock_g = Decimal(str(it.filament.stock_g or 0)) + Decimal(str(it.weight_g))
+                        it.filament.stock_g = (
+                            Decimal(str(it.filament.stock_g or 0))
+                            + Decimal(str(it.weight_g)) * qty
+                        )
     db.session.delete(order)
     db.session.commit()
     msg = "Order deleted." if order.skip_stock_deduction else "Order deleted and stock restored."
@@ -1516,6 +1628,13 @@ def stats():
     total_cost_commercial = total_filament_spend_commercial + total_electricity_commercial
     total_profit = total_revenue - total_cost_commercial
 
+    # Retail / particular split + VAT collected (delivered commercial only)
+    delivered_retail = [o for o in delivered_commercial if o.has_vat]
+    delivered_particular = [o for o in delivered_commercial if not o.has_vat]
+    revenue_retail = sum((o.sell_price for o in delivered_retail), Decimal(0))
+    revenue_particular = sum((o.sell_price for o in delivered_particular), Decimal(0))
+    total_vat_collected = sum((o.vat_amount for o in delivered_retail), Decimal(0))
+
     total_filament_spend_internal = sum(
         (o.filament_cost for o in internal_orders), Decimal(0)
     )
@@ -1548,11 +1667,12 @@ def stats():
     total_stock_kg = sum((f.stock_kg for f in filaments), Decimal(0))
 
     # --- Monthly breakdown (last 12 months, commercial delivered only) ---
-    monthly = defaultdict(lambda: {"revenue": Decimal(0), "cost": Decimal(0), "orders": 0})
+    monthly = defaultdict(lambda: {"revenue": Decimal(0), "cost": Decimal(0), "vat": Decimal(0), "orders": 0})
     for o in delivered_commercial:
         key = o.delivered_at.strftime("%Y-%m")
         monthly[key]["revenue"] += o.sell_price
         monthly[key]["cost"] += o.total_cost
+        monthly[key]["vat"] += o.vat_amount
         monthly[key]["orders"] += 1
 
     # Build sorted list of months (all months present in data, at most last 24)
@@ -1564,6 +1684,7 @@ def stats():
         rev = monthly[key]["revenue"]
         cost = monthly[key]["cost"]
         profit = rev - cost
+        vat = monthly[key]["vat"]
         monthly_rows.append(
             {
                 "key": key,
@@ -1571,6 +1692,7 @@ def stats():
                 "revenue": rev,
                 "cost": cost,
                 "profit": profit,
+                "vat": vat,
                 "orders": monthly[key]["orders"],
             }
         )
@@ -1627,6 +1749,11 @@ def stats():
         total_electricity_commercial=total_electricity_commercial,
         total_cost_commercial=total_cost_commercial,
         total_profit=total_profit,
+        # retail / VAT
+        revenue_retail=revenue_retail,
+        revenue_particular=revenue_particular,
+        total_vat_collected=total_vat_collected,
+        delivered_retail_count=len(delivered_retail),
         # totals — internal
         total_filament_spend_internal=total_filament_spend_internal,
         total_electricity_internal=total_electricity_internal,

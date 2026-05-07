@@ -107,6 +107,25 @@ def _run_additive_migrations(app):
             conn.execute(text("ALTER TABLE filaments ADD COLUMN color_hex VARCHAR(7) NULL"))
             conn.commit()
 
+        # print_orders: retail mode columns (quantity, VAT)
+        for col_name, col_spec in [
+            ("quantity",     "INT NOT NULL DEFAULT 1"),
+            ("has_vat",      "TINYINT(1) NOT NULL DEFAULT 0"),
+            ("vat_rate_pct", "DECIMAL(6,2) NULL"),
+        ]:
+            result = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM information_schema.columns "
+                    "WHERE table_schema = DATABASE() "
+                    "AND table_name = 'print_orders' "
+                    "AND column_name = :col"
+                ),
+                {"col": col_name},
+            )
+            if result.scalar() == 0:
+                conn.execute(text(f"ALTER TABLE print_orders ADD COLUMN {col_name} {col_spec}"))
+                conn.commit()
+
 
 def _has_column(conn, table, column):
     return conn.execute(
@@ -340,7 +359,10 @@ def create_app():
     @app.context_processor
     def inject_currency():
         from .models import Setting
-        return {"currency": Setting.get("currency_symbol", cast=str) or "€"}
+        return {
+            "currency": Setting.get("currency_symbol", cast=str) or "€",
+            "retail_mode_enabled": Setting.get_bool("retail_mode_enabled"),
+        }
 
     with app.app_context():
         for attempt in range(10):

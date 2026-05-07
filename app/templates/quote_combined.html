@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Combined quote — {{ orders | length }} order{{ 's' if orders | length != 1 else '' }}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/flatly/bootstrap.min.css">
+  <style>
+    body { background: #f0f4f8; }
+    .quote-card { max-width: 760px; margin: 0 auto; }
+    .price-box {
+      background: linear-gradient(135deg, #2c3e50 0%, #18bc9c 100%);
+      border-radius: 12px;
+      color: #fff;
+    }
+    .quote-footer { font-size: .78rem; color: #94a3b8; }
+    .item-table th { font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:#64748b; }
+    .item-table td { vertical-align: middle; }
+    .item-table .item-name { color:#1e293b; }
+    .item-table .vat-tag { font-size:.7rem; color:#64748b; }
+    @media print {
+      body { background: #fff; }
+      .no-print { display: none !important; }
+      .quote-card { max-width: 100%; }
+    }
+  </style>
+</head>
+<body class="py-5 px-3">
+
+  <div class="quote-card">
+
+    {# ── header ── #}
+    <div class="d-flex justify-content-between align-items-start mb-4">
+      <div>
+        <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing:.06em">Combined quote</div>
+        <div class="text-muted small mt-1">
+          {{ orders | length }} item{{ 's' if orders | length != 1 else '' }}
+          &nbsp;·&nbsp; {{ orders[0].created_at.strftime('%d %b %Y') }}
+        </div>
+      </div>
+      <div class="text-end no-print">
+        <button onclick="window.print()" class="btn btn-outline-secondary btn-sm me-1">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="me-1"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Print
+        </button>
+        <a href="{{ url_for('main.orders_list') }}" class="btn btn-outline-secondary btn-sm">← Orders</a>
+      </div>
+    </div>
+
+    {# ── shared customer (only when all orders share one) ── #}
+    {% set customers = orders | map(attribute='customer') | reject('none') | list | unique | list %}
+    {% if customers | length == 1 %}
+      <div class="mb-4">
+        <p class="text-muted mb-0">Prepared for <strong>{{ customers[0] }}</strong></p>
+      </div>
+    {% endif %}
+
+    {# ── item table ── #}
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="table-responsive">
+        <table class="table item-table mb-0">
+          <thead>
+            <tr>
+              <th class="border-0 ps-3" style="width:64px">Qty</th>
+              <th class="border-0">Item</th>
+              <th class="border-0 text-end" style="width:120px">Unit (excl. VAT)</th>
+              <th class="border-0 text-end pe-3" style="width:130px">Total (excl. VAT)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for o in orders %}
+              {% if not o.is_internal %}
+              <tr>
+                <td class="ps-3">{{ o.qty }} ×</td>
+                <td>
+                  <div class="item-name fw-semibold">{{ o.name }}</div>
+                  {% if o.has_vat %}
+                    <div class="vat-tag">VAT {{ o.vat_rate_pct }} %</div>
+                  {% endif %}
+                </td>
+                <td class="text-end">{{ '%.2f'|format(o.unit_sell_price) }} {{ currency }}</td>
+                <td class="text-end pe-3">{{ '%.2f'|format(o.sell_price) }} {{ currency }}</td>
+              </tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# ── totals box ── #}
+    <div class="price-box p-4 mb-4 shadow-sm">
+      {% if has_any_vat %}
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div style="opacity:.85;font-size:.92rem">Subtotal (excl. VAT)</div>
+          <div style="font-weight:600;font-size:1.05rem">{{ '%.2f'|format(subtotal) }} {{ currency }}</div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div style="opacity:.85;font-size:.92rem">
+            VAT
+            {% if vat_rates | length == 1 %}
+              ({{ vat_rates[0] }} %)
+            {% elif vat_rates | length > 1 %}
+              (mixed: {{ vat_rates | map('string') | join(' / ') }} %)
+            {% endif %}
+          </div>
+          <div style="font-weight:600;font-size:1.05rem">{{ '%.2f'|format(vat_total) }} {{ currency }}</div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center pt-3" style="border-top:1px solid rgba(255,255,255,.25)">
+          <div>
+            <div style="font-size:.8rem;opacity:.75;text-transform:uppercase;letter-spacing:.06em">Total (incl. VAT)</div>
+            <div style="font-size:2.2rem;font-weight:700;line-height:1.1">{{ '%.2f'|format(total) }} {{ currency }}</div>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.35"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+      {% else %}
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <div style="font-size:.8rem;opacity:.75;text-transform:uppercase;letter-spacing:.06em">Total price</div>
+            <div style="font-size:2.2rem;font-weight:700;line-height:1.1">{{ '%.2f'|format(total) }} {{ currency }}</div>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.35"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+      {% endif %}
+    </div>
+
+    {# ── note about personal-use orders that were filtered ── #}
+    {% set personal = orders | selectattr('is_internal') | list %}
+    {% if personal %}
+      <div class="alert alert-light small">
+        {{ personal | length }} personal-use order{{ 's' if personal | length != 1 else '' }} excluded from totals.
+      </div>
+    {% endif %}
+
+    {# ── footer ── #}
+    <div class="quote-footer text-center mt-5 pt-3 border-top">
+      Generated with Spoolwise &nbsp;·&nbsp; {{ orders[0].created_at.strftime('%d %b %Y') }}
+    </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

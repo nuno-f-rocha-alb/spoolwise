@@ -57,6 +57,48 @@
   </div>
 </div>
 
+{# ── Retail / VAT row (only in retail mode) ── #}
+{% if retail_mode_enabled %}
+<div class="row g-3 mb-3">
+  <div class="col-6 col-md-3">
+    <div class="card shadow-sm h-100 border-success">
+      <div class="card-body">
+        <div class="text-muted small mb-1">VAT collected</div>
+        <div class="fs-4 fw-bold text-success">{{ '%.2f'|format(total_vat_collected) }} {{ currency }}</div>
+        <div class="text-muted small">{{ delivered_retail_count }} retail order{{ 's' if delivered_retail_count != 1 else '' }} delivered</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small mb-1">Revenue — retail (excl. VAT)</div>
+        <div class="fs-5 fw-bold">{{ '%.2f'|format(revenue_retail) }} {{ currency }}</div>
+        <div class="text-muted small">Subject to VAT</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small mb-1">Revenue — particular</div>
+        <div class="fs-5 fw-bold">{{ '%.2f'|format(revenue_particular) }} {{ currency }}</div>
+        <div class="text-muted small">No VAT applied</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card shadow-sm h-100 border-info">
+      <div class="card-body">
+        <div class="text-muted small mb-1">Total invoiced (incl. VAT)</div>
+        <div class="fs-5 fw-bold text-info">{{ '%.2f'|format(total_revenue + total_vat_collected) }} {{ currency }}</div>
+        <div class="text-muted small">What customers actually paid</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {# ── Row 2: print time + internal costs + stock ── #}
 <div class="row g-3 mb-4">
   <div class="col-md-4">
@@ -166,6 +208,7 @@
           <th class="text-end">Orders</th>
           <th class="text-end">Cost</th>
           <th class="text-end">Revenue</th>
+          {% if retail_mode_enabled %}<th class="text-end">VAT</th>{% endif %}
           <th class="text-end">Profit</th>
           <th class="text-end">Margin</th>
         </tr>
@@ -177,6 +220,9 @@
           <td class="text-end">{{ row.orders }}</td>
           <td class="text-end text-danger">{{ '%.2f'|format(row.cost) }} {{ currency }}</td>
           <td class="text-end text-success">{{ '%.2f'|format(row.revenue) }} {{ currency }}</td>
+          {% if retail_mode_enabled %}
+          <td class="text-end text-info">{{ '%.2f'|format(row.vat) }} {{ currency }}</td>
+          {% endif %}
           <td class="text-end {% if row.profit >= 0 %}text-primary{% else %}text-danger{% endif %}">
             {{ '+' if row.profit >= 0 else '' }}{{ '%.2f'|format(row.profit) }} {{ currency }}
           </td>
@@ -192,6 +238,9 @@
           <td class="text-end">{{ counts.delivered }}</td>
           <td class="text-end text-danger">{{ '%.2f'|format(total_cost_commercial) }} {{ currency }}</td>
           <td class="text-end text-success">{{ '%.2f'|format(total_revenue) }} {{ currency }}</td>
+          {% if retail_mode_enabled %}
+          <td class="text-end text-info">{{ '%.2f'|format(total_vat_collected) }} {{ currency }}</td>
+          {% endif %}
           <td class="text-end {% if total_profit >= 0 %}text-primary{% else %}text-danger{% endif %}">
             {{ '+' if total_profit >= 0 else '' }}{{ '%.2f'|format(total_profit) }} {{ currency }}
           </td>

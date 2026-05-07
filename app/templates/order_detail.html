@@ -4,12 +4,18 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
     <h1 class="h3 mb-0">
+      {% if order.quantity and order.quantity > 1 %}
+        <span class="text-muted">{{ order.quantity }} ×</span>
+      {% endif %}
       {{ order.name }}
       {% if order.is_internal %}
         <span class="badge bg-warning text-dark fs-6 align-middle ms-1">Personal use</span>
       {% endif %}
       {% if order.skip_stock_deduction %}
         <span class="badge bg-info text-dark fs-6 align-middle ms-1">Quote</span>
+      {% endif %}
+      {% if order.has_vat %}
+        <span class="badge bg-success text-white fs-6 align-middle ms-1">VAT {{ order.vat_rate_pct }}%</span>
       {% endif %}
     </h1>
     <div class="text-muted small">
@@ -263,6 +269,11 @@
         <li class="list-group-item d-flex justify-content-between">
           <span>Plates</span><strong>{{ order.plates|length }}</strong>
         </li>
+        {% if order.qty > 1 %}
+        <li class="list-group-item d-flex justify-content-between">
+          <span>Quantity</span><strong>× {{ order.qty }}</strong>
+        </li>
+        {% endif %}
         <li class="list-group-item d-flex justify-content-between">
           <span>Total print time</span><strong>{{ order.total_print_time_hours|duration }}</strong>
         </li>
@@ -273,10 +284,12 @@
           <span>Electricity price</span><strong>{{ '%.4f'|format(order.electricity_price_per_kwh) }} {{ currency }}/kWh</strong>
         </li>
         <li class="list-group-item d-flex justify-content-between">
-          <span>Filament cost</span><strong>{{ '%.2f'|format(order.filament_cost) }} {{ currency }}</strong>
+          <span>Filament cost{% if order.qty > 1 %} (× {{ order.qty }}){% endif %}</span>
+          <strong>{{ '%.2f'|format(order.filament_cost) }} {{ currency }}</strong>
         </li>
         <li class="list-group-item d-flex justify-content-between">
-          <span>Electricity cost</span><strong>{{ '%.2f'|format(order.electricity_cost) }} {{ currency }}</strong>
+          <span>Electricity cost{% if order.qty > 1 %} (× {{ order.qty }}){% endif %}</span>
+          <strong>{{ '%.2f'|format(order.electricity_cost) }} {{ currency }}</strong>
         </li>
         <li class="list-group-item d-flex justify-content-between bg-body-secondary">
           <span>Total cost</span><strong>{{ '%.2f'|format(order.total_cost) }} {{ currency }}</strong>
@@ -295,9 +308,33 @@
         <li class="list-group-item d-flex justify-content-between text-success">
           <span>Profit</span><strong>+{{ '%.2f'|format(order.profit_value) }} {{ currency }}</strong>
         </li>
+        {% if order.has_vat %}
+        <li class="list-group-item d-flex justify-content-between">
+          <span>Subtotal (excl. VAT)</span><strong>{{ '%.2f'|format(order.sell_price) }} {{ currency }}</strong>
+        </li>
+        <li class="list-group-item d-flex justify-content-between">
+          <span>VAT ({{ order.vat_rate_pct }} %)</span><strong>{{ '%.2f'|format(order.vat_amount) }} {{ currency }}</strong>
+        </li>
+        <li class="list-group-item d-flex justify-content-between bg-primary text-white">
+          <span>Sale price (incl. VAT)</span><strong>{{ '%.2f'|format(order.sell_price_with_vat) }} {{ currency }}</strong>
+        </li>
+        {% if order.qty > 1 %}
+        <li class="list-group-item d-flex justify-content-between small text-muted">
+          <span>Per unit (incl. VAT)</span>
+          <span>{{ '%.2f'|format(order.sell_price_with_vat / order.qty) }} {{ currency }}</span>
+        </li>
+        {% endif %}
+        {% else %}
         <li class="list-group-item d-flex justify-content-between bg-primary text-white">
           <span>Sale price</span><strong>{{ '%.2f'|format(order.sell_price) }} {{ currency }}</strong>
         </li>
+        {% if order.qty > 1 %}
+        <li class="list-group-item d-flex justify-content-between small text-muted">
+          <span>Per unit</span>
+          <span>{{ '%.2f'|format(order.unit_sell_price) }} {{ currency }}</span>
+        </li>
+        {% endif %}
+        {% endif %}
         {% endif %}
       </ul>
     </div>

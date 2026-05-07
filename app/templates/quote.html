@@ -116,16 +116,60 @@
       </div>
     </div>
 
+    {# ── line item breakdown (only when qty>1 or VAT applies) ── #}
+    {% if not order.is_internal and (order.qty > 1 or order.has_vat) %}
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body py-3">
+        <table class="table table-sm mb-0">
+          <thead>
+            <tr class="text-muted small text-uppercase" style="letter-spacing:.05em">
+              <th class="border-0" style="width:60px">Qty</th>
+              <th class="border-0">Item</th>
+              <th class="border-0 text-end" style="width:110px">Unit (excl. VAT)</th>
+              <th class="border-0 text-end" style="width:110px">Total (excl. VAT)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>{{ order.qty }} ×</td>
+              <td><strong>{{ order.name }}</strong></td>
+              <td class="text-end">{{ '%.2f'|format(order.unit_sell_price) }} {{ currency }}</td>
+              <td class="text-end">{{ '%.2f'|format(order.sell_price) }} {{ currency }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
     {# ── price box ── #}
     {% if not order.is_internal %}
     <div class="price-box p-4 mb-4 shadow-sm">
-      <div class="d-flex justify-content-between align-items-center">
-        <div>
-          <div style="font-size:.8rem;opacity:.75;text-transform:uppercase;letter-spacing:.06em">Total price</div>
-          <div style="font-size:2.2rem;font-weight:700;line-height:1.1">{{ '%.2f'|format(order.sell_price) }} {{ currency }}</div>
+      {% if order.has_vat %}
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div style="opacity:.85;font-size:.92rem">Subtotal (excl. VAT)</div>
+          <div style="font-weight:600;font-size:1.05rem">{{ '%.2f'|format(order.sell_price) }} {{ currency }}</div>
         </div>
-        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.35"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-      </div>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div style="opacity:.85;font-size:.92rem">VAT ({{ order.vat_rate_pct }} %)</div>
+          <div style="font-weight:600;font-size:1.05rem">{{ '%.2f'|format(order.vat_amount) }} {{ currency }}</div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center pt-3" style="border-top:1px solid rgba(255,255,255,.25)">
+          <div>
+            <div style="font-size:.8rem;opacity:.75;text-transform:uppercase;letter-spacing:.06em">Total (incl. VAT)</div>
+            <div style="font-size:2.2rem;font-weight:700;line-height:1.1">{{ '%.2f'|format(order.sell_price_with_vat) }} {{ currency }}</div>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.35"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+      {% else %}
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <div style="font-size:.8rem;opacity:.75;text-transform:uppercase;letter-spacing:.06em">Total price</div>
+            <div style="font-size:2.2rem;font-weight:700;line-height:1.1">{{ '%.2f'|format(order.sell_price) }} {{ currency }}</div>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.35"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+      {% endif %}
     </div>
     {% endif %}
 

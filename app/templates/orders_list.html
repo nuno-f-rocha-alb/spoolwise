@@ -27,11 +27,22 @@
   </div>
 </div>
 
+<div id="combined-quote-bar" class="d-none alert alert-info d-flex justify-content-between align-items-center py-2 mb-2">
+  <span><strong id="cq-count">0</strong> orders selected</span>
+  <div class="d-flex gap-2">
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="cq-clear">Clear</button>
+    <a href="#" class="btn btn-sm btn-success" id="cq-generate" target="_blank">Generate combined quote →</a>
+  </div>
+</div>
+
 <div class="card shadow-sm">
   <div class="table-responsive">
     <table class="table mb-0 align-middle">
       <thead>
         <tr>
+          <th style="width:32px">
+            <input type="checkbox" class="form-check-input" id="cq-check-all" aria-label="Select all">
+          </th>
           <th>Name</th><th>Customer</th><th>Date</th>
           <th class="text-end">Time</th>
           <th class="text-end">Cost</th>
@@ -45,12 +56,22 @@
       {% for o in orders %}
         <tr{% if o.is_internal %} class="table-warning"{% endif %}>
           <td>
-            <a href="{{ url_for('main.order_detail', oid=o.id) }}">{{ o.name }}</a>
+            <input type="checkbox" class="form-check-input cq-row" data-oid="{{ o.id }}"
+                   {% if o.is_internal %}disabled title="Personal-use orders aren't included in quotes"{% endif %}
+                   aria-label="Select order">
+          </td>
+          <td>
+            <a href="{{ url_for('main.order_detail', oid=o.id) }}">
+              {% if o.qty and o.qty > 1 %}<span class="text-muted">{{ o.qty }} ×</span> {% endif %}{{ o.name }}
+            </a>
             {% if o.is_internal %}
               <span class="badge bg-warning text-dark ms-1">Personal</span>
             {% endif %}
             {% if o.skip_stock_deduction %}
               <span class="badge bg-info text-dark ms-1">Quote</span>
+            {% endif %}
+            {% if o.has_vat %}
+              <span class="badge bg-success ms-1">VAT</span>
             {% endif %}
           </td>
           <td>{{ o.customer or '—' }}</td>
@@ -61,7 +82,10 @@
             <td class="text-end text-muted">—</td>
             <td class="text-end text-muted">—</td>
           {% else %}
-            <td class="text-end"><strong>{{ '%.2f'|format(o.sell_price) }} {{ currency }}</strong></td>
+            <td class="text-end">
+              <strong>{{ '%.2f'|format(o.sell_price_with_vat if o.has_vat else o.sell_price) }} {{ currency }}</strong>
+              {% if o.has_vat %}<div class="small text-muted">incl. VAT</div>{% endif %}
+            </td>
             <td class="text-end text-success">+{{ '%.2f'|format(o.profit_value) }} {{ currency }}</td>
           {% endif %}
           <td>
@@ -87,10 +111,60 @@
           </td>
         </tr>
       {% else %}
-        <tr><td colspan="9" class="text-center text-muted py-4">No orders.</td></tr>
+        <tr><td colspan="10" class="text-center text-muted py-4">No orders.</td></tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const bar       = document.getElementById('combined-quote-bar');
+  const countEl   = document.getElementById('cq-count');
+  const clearBtn  = document.getElementById('cq-clear');
+  const generateA = document.getElementById('cq-generate');
+  const allBox    = document.getElementById('cq-check-all');
+  const rowBoxes  = () => Array.from(document.querySelectorAll('.cq-row:not(:disabled)'));
+  const checked   = () => rowBoxes().filter(b => b.checked);
+
+  function refresh() {
+    const sel = checked();
+    if (sel.length === 0) {
+      bar.classList.add('d-none');
+      allBox.checked = false;
+      allBox.indeterminate = false;
+      return;
+    }
+    bar.classList.remove('d-none');
+    countEl.textContent = sel.length;
+    const ids = sel.map(b => b.dataset.oid).join(',');
+    if (sel.length === 1) {
+      generateA.href = `/quote/${sel[0].dataset.oid}`;
+      generateA.textContent = 'Open quote →';
+    } else {
+      generateA.href = `/quote/combined?ids=${encodeURIComponent(ids)}`;
+      generateA.textContent = 'Generate combined quote →';
+    }
+    const all = rowBoxes();
+    if (sel.length === all.length) {
+      allBox.checked = true; allBox.indeterminate = false;
+    } else {
+      allBox.checked = false; allBox.indeterminate = true;
+    }
+  }
+
+  rowBoxes().forEach(b => b.addEventListener('change', refresh));
+  allBox.addEventListener('change', () => {
+    rowBoxes().forEach(b => b.checked = allBox.checked);
+    refresh();
+  });
+  clearBtn.addEventListener('click', () => {
+    rowBoxes().forEach(b => b.checked = false);
+    refresh();
+  });
+})();
+</script>
 {% endblock %}

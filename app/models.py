@@ -40,7 +40,16 @@ class Setting(db.Model):
         "printer_power_watts": "250",
         "default_profit_pct": "30",
         "currency_symbol": "€",
+        "retail_mode_enabled": "false",
+        "default_vat_rate_pct": "23.00",
     }
+
+    @classmethod
+    def get_bool(cls, key, default=False):
+        row = db.session.get(cls, key)
+        if row is None:
+            return default
+        return str(row.value).strip().lower() in ("true", "1", "yes", "on")
 
     @classmethod
     def ensure_defaults(cls):
@@ -140,6 +149,9 @@ class PrintOrder(db.Model):
     printer_power_watts = db.Column(Numeric(10, 2), nullable=False)
     is_internal = db.Column(db.Boolean, nullable=False, default=False)
     skip_stock_deduction = db.Column(db.Boolean, nullable=False, default=False)
+    quantity = db.Column(db.Integer, nullable=False, default=1)
+    has_vat = db.Column(db.Boolean, nullable=False, default=False)
+    vat_rate_pct = db.Column(Numeric(6, 2), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     printed_at = db.Column(db.DateTime, nullable=True)
     delivered_at = db.Column(db.DateTime, nullable=True)
@@ -164,16 +176,37 @@ class PrintOrder(db.Model):
     )
 
     @property
-    def total_print_time_hours(self):
+    def qty(self):
+        """Defensive accessor: legacy rows may have NULL until backfilled."""
+        return int(self.quantity or 1)
+
+    @property
+    def unit_print_time_hours(self):
         return sum((Decimal(str(p.print_time_hours)) for p in self.plates), Decimal(0))
 
     @property
-    def filament_cost(self):
+    def total_print_time_hours(self):
+        return self.unit_print_time_hours * Decimal(self.qty)
+
+    @property
+    def unit_filament_cost(self):
         return sum((p.filament_cost for p in self.plates), Decimal(0))
 
     @property
-    def electricity_cost(self):
+    def filament_cost(self):
+        return self.unit_filament_cost * Decimal(self.qty)
+
+    @property
+    def unit_electricity_cost(self):
         return sum((p.electricity_cost for p in self.plates), Decimal(0))
+
+    @property
+    def electricity_cost(self):
+        return self.unit_electricity_cost * Decimal(self.qty)
+
+    @property
+    def unit_cost(self):
+        return self.unit_filament_cost + self.unit_electricity_cost
 
     @property
     def total_cost(self):
@@ -181,10 +214,33 @@ class PrintOrder(db.Model):
 
     @property
     def sell_price(self):
+        """Sell price excluding VAT. Equivalent to old behaviour."""
         return self.total_cost * (Decimal(1) + Decimal(str(self.profit_pct)) / Decimal(100))
 
     @property
+    def unit_sell_price(self):
+        return self.sell_price / Decimal(self.qty) if self.qty else self.sell_price
+
+    @property
+    def vat_rate(self):
+        """VAT rate as Decimal, or 0 if no VAT applies."""
+        if not self.has_vat or self.vat_rate_pct is None:
+            return Decimal(0)
+        return Decimal(str(self.vat_rate_pct))
+
+    @property
+    def vat_amount(self):
+        if not self.has_vat:
+            return Decimal(0)
+        return self.sell_price * self.vat_rate / Decimal(100)
+
+    @property
+    def sell_price_with_vat(self):
+        return self.sell_price + self.vat_amount
+
+    @property
     def profit_value(self):
+        """Profit excludes VAT — VAT is owed to the state, not income."""
         return self.sell_price - self.total_cost
 
     @property
