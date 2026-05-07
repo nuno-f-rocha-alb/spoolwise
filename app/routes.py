@@ -30,6 +30,51 @@ from .models import (
 )
 
 
+def _retail_material_avg_prices(user_id):
+    """Stock-weighted average price/kg per material across the user's stock.
+
+    Returns ``{material: Decimal(price_per_kg)}``. Used by retail orders so
+    the same product invoiced to a business has a stable cost regardless of
+    which specific spool happened to be loaded — avoids charging the same
+    deck box at different prices just because one filament is cheaper.
+
+    Falls back per-material to whichever filaments have stock_g > 0.
+    """
+    from sqlalchemy import func
+    rows = (
+        db.session.query(
+            Filament.material,
+            func.sum(Filament.stock_g * Filament.avg_price_per_kg).label("value"),
+            func.sum(Filament.stock_g).label("weight"),
+        )
+        .filter(Filament.user_id == user_id, Filament.stock_g > 0)
+        .group_by(Filament.material)
+        .all()
+    )
+    avg = {}
+    for material, value, weight in rows:
+        if weight is not None and Decimal(str(weight)) > 0:
+            avg[material] = Decimal(str(value)) / Decimal(str(weight))
+    return avg
+
+
+def _snapshot_price_factory(has_vat, user_id):
+    """Return a function(filament) -> Decimal price_per_kg to snapshot.
+
+    For retail orders (has_vat=True), snapshots the material-weighted
+    average. For everything else, the filament's own avg_price_per_kg —
+    same as before this feature."""
+    if not has_vat:
+        return lambda f: Decimal(str(f.avg_price_per_kg or 0))
+    avg = _retail_material_avg_prices(user_id)
+    def _price(f):
+        material_avg = avg.get(f.material)
+        if material_avg is not None:
+            return material_avg
+        return Decimal(str(f.avg_price_per_kg or 0))
+    return _price
+
+
 def _user_filament_or_404(fid):
     f = Filament.query.filter_by(id=fid, user_id=current_user.id).first()
     if f is None:
@@ -994,6 +1039,7 @@ def order_new():
                 order_id=order.id, position=pos, url=url, title=title, image=image
             ))
 
+        snapshot_price = _snapshot_price_factory(has_vat, current_user.id)
         for pos, (pt, plate_items) in enumerate(plates_data, start=1):
             plate = PrintPlate(order_id=order.id, position=pos, print_time_hours=pt)
             db.session.add(plate)
@@ -1005,7 +1051,7 @@ def order_new():
                         plate_id=plate.id,
                         filament_id=f.id,
                         weight_g=w,
-                        price_per_kg_snapshot=f.avg_price_per_kg or Decimal(0),
+                        price_per_kg_snapshot=snapshot_price(f),
                     )
                 )
 
@@ -1264,6 +1310,7 @@ def order_edit(oid):
                 ))
 
         # Add new plates and filaments
+        snapshot_price = _snapshot_price_factory(has_vat, current_user.id)
         for pos, (pt, plate_items) in enumerate(plates_data, start=1):
             plate = PrintPlate(order_id=order.id, position=pos, print_time_hours=pt)
             db.session.add(plate)
@@ -1275,7 +1322,7 @@ def order_edit(oid):
                         plate_id=plate.id,
                         filament_id=f.id,
                         weight_g=w,
-                        price_per_kg_snapshot=f.avg_price_per_kg or Decimal(0),
+                        price_per_kg_snapshot=snapshot_price(f),
                     )
                 )
 

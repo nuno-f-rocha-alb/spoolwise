@@ -309,6 +309,9 @@
           <span>Profit</span><strong>+{{ '%.2f'|format(order.profit_value) }} {{ currency }}</strong>
         </li>
         {% if order.has_vat %}
+        <li class="list-group-item small text-muted">
+          <span class="d-block">Filament cost averaged per material at retail pricing — same product invoiced at a stable price regardless of which spool was loaded.</span>
+        </li>
         <li class="list-group-item d-flex justify-content-between">
           <span>Subtotal (excl. VAT)</span><strong>{{ '%.2f'|format(order.sell_price) }} {{ currency }}</strong>
         </li>
