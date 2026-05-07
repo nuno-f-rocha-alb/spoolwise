@@ -229,31 +229,49 @@ request — no manual promotion needed. If the proxy does not send
 ```nginx
 server {
     listen 443 ssl;
+    listen [::]:443 ssl;
     server_name spoolwise.*;
+
     include /config/nginx/ssl.conf;
 
-    location / {
-        # Forward to Authelia for auth
-        include /config/nginx/authelia-location.conf;
+    # Spoolwise allows up to 150 MB uploads (3MF files).
+    client_max_body_size 200M;
 
+    include /config/nginx/authelia-server.conf;
+
+    location / {
+        # auth_request to Authelia + forwards Remote-User/Email/Name/Groups
+        # headers automatically. Do NOT add proxy_set_header Remote-* below
+        # — this include already does it. Setting them again would result
+        # in duplicate headers concatenated with a comma by WSGI, breaking
+        # username matching.
+        include /config/nginx/authelia-location.conf;
         include /config/nginx/proxy.conf;
-        set $upstream_app spoolwise;
+
+        set $upstream_app spoolwise;   # docker container name, OR an IP
         set $upstream_port 5000;
         set $upstream_proto http;
         proxy_pass $upstream_proto://$upstream_app:$upstream_port;
-
-        # Pass identity headers from Authelia to the app
-        auth_request_set $user   $upstream_http_remote_user;
-        auth_request_set $email  $upstream_http_remote_email;
-        auth_request_set $name   $upstream_http_remote_name;
-        auth_request_set $groups $upstream_http_remote_groups;
-        proxy_set_header Remote-User   $user;
-        proxy_set_header Remote-Email  $email;
-        proxy_set_header Remote-Name   $name;
-        proxy_set_header Remote-Groups $groups;
     }
 }
 ```
+
+If your reverse proxy does **not** auto-forward `Remote-*` headers from the
+auth_request response (some setups need this added manually), uncomment and
+add inside `location /`:
+
+```nginx
+auth_request_set $user   $upstream_http_remote_user;
+auth_request_set $email  $upstream_http_remote_email;
+auth_request_set $name   $upstream_http_remote_name;
+auth_request_set $groups $upstream_http_remote_groups;
+proxy_set_header Remote-User   $user;
+proxy_set_header Remote-Email  $email;
+proxy_set_header Remote-Name   $name;
+proxy_set_header Remote-Groups $groups;
+```
+
+But only if `authelia-location.conf` does not already emit those headers — check the include first.
 
 **Authelia `configuration.yml`** — add an access-control rule:
 
