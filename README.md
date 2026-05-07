@@ -35,6 +35,7 @@ A self-hosted web app to manage 3D print orders, filament inventory, costs and b
 | **Currency** | Configurable symbol in Settings (default `€`) |
 | **Dark / light mode** | Toggle in the navbar, persisted in `localStorage` |
 | **Multi-user** | Per-user data isolation; admin-managed accounts; optional Authelia/SSO via trusted proxy headers |
+| **Retail mode** | Optional VAT on orders, per-order quantity, multi-order combined quotes, VAT-collected stats |
 
 ---
 
@@ -160,6 +161,36 @@ python run.py
 
 To update after a new image is pushed to Docker Hub:  
 **Stacks → your stack → Editor → Update the stack** (Portainer pulls the latest image).
+
+---
+
+## Retail mode (VAT, quantity, combined quotes)
+
+Spoolwise can run in a **retail mode** for users selling to businesses (e.g.
+a Portuguese self-employed seller invoicing a local store). When enabled:
+
+- **Quantity per order.** An order can produce N identical units. Cost,
+  print time and stock deduction all scale by quantity.
+- **Optional VAT per order.** The order form gets an "Apply VAT" toggle and
+  a rate field. The VAT rate is snapshotted at creation, so changes to the
+  default rate later won't rewrite history. VAT is excluded from `profit`
+  (it's owed to the state, not income).
+- **Combined quotes.** Tick checkboxes on the orders list to select multiple
+  orders, then click *Generate combined quote* to get a single printable
+  page with line items per order plus aggregate subtotal, VAT and total.
+  Mixed VAT/no-VAT and mixed VAT rates are handled.
+- **Stats.** A "VAT collected" KPI plus a retail / particular revenue split,
+  and a per-month VAT column.
+- **Stock policy.** Stock validation is *warn-but-allow*: an order with a
+  quantity that exceeds available stock is created anyway and goes into
+  negative; a flash message reminds you to top up inventory.
+
+Toggle in **Settings → Retail mode**. While off, none of the above is
+visible and the app behaves as before. Existing orders default to
+`quantity=1` and no VAT.
+
+The default VAT rate (used to pre-fill new orders) is configurable in
+Settings — set to your country's standard rate (Portugal: 23).
 
 ---
 
@@ -303,12 +334,24 @@ Pushing to `main` triggers a GitHub Actions workflow (`.github/workflows/docker.
 
 ## Cost model
 
+Per-unit values come from the plates; order-level totals multiply by `quantity`:
+
 ```
-filament_cost    = Σ (weight_g / 1000 × avg_price_per_kg)   [snapshotted at order creation]
-electricity_cost = (printer_watts / 1000) × print_hours × price_per_kwh
-total_cost       = filament_cost + electricity_cost
-sale_price       = total_cost × (1 + profit_pct / 100)
+unit_filament_cost    = Σ (weight_g / 1000 × avg_price_per_kg)   [snapshotted at order creation]
+unit_electricity_cost = (printer_watts / 1000) × print_hours × price_per_kwh
+unit_cost             = unit_filament_cost + unit_electricity_cost
+
+total_cost            = unit_cost × quantity
+sell_price            = total_cost × (1 + profit_pct / 100)        [excl. VAT]
+profit                = sell_price − total_cost                    [VAT not included]
+
+# Retail mode only:
+vat_amount            = sell_price × vat_rate_pct / 100
+sell_price_with_vat   = sell_price + vat_amount
 ```
+
+`quantity` defaults to 1 when retail mode is off, so the formulas
+collapse back to per-order values.
 
 Weighted-average price on new filament purchase:
 
