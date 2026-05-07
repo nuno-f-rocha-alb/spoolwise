@@ -29,6 +29,7 @@ services:
       FLASK_DEBUG: "0"
       # Multi-user / auth
       TRUST_PROXY_AUTH: ${TRUST_PROXY_AUTH:-false}
+      DISABLE_LOCAL_LOGIN: ${DISABLE_LOCAL_LOGIN:-false}
       TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}

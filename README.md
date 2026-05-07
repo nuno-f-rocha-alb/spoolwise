@@ -190,8 +190,20 @@ TRUST_PROXY_AUTH=true
 TRUSTED_PROXY_IPS=172.18.0.0/16   # your docker network or proxy IP(s)
 ```
 
-In trusted-header mode, the native `/login` form is disabled (returns 404) and
-the app reads identity from these request headers, set by Authelia and
+By default this runs in **hybrid mode**: requests that arrive with a
+`Remote-User` header from a trusted proxy are auto-logged-in, and direct
+requests (e.g. `http://<server-ip>:5000` from your LAN) still see the
+native `/login` form. This lets you keep direct LAN access while exposing
+the public hostname behind Authelia.
+
+To lock down to **strict SSO** (form disabled, identity must come from the
+proxy), also set:
+
+```env
+DISABLE_LOCAL_LOGIN=true
+```
+
+The app reads identity from these request headers, set by Authelia and
 forwarded by SWAG:
 
 | Header         | Purpose                                  |

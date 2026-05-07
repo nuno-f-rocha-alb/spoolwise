@@ -16,7 +16,7 @@ import os
 
 from flask import (
     Blueprint, abort, current_app, flash, g, redirect, render_template,
-    request, url_for,
+    request, session, url_for,
 )
 from flask_login import (
     LoginManager, current_user, login_required, login_user, logout_user,
@@ -57,6 +57,16 @@ def verify_password(hashed: str | None, plain: str) -> bool:
 
 def trust_proxy_auth() -> bool:
     return (os.getenv("TRUST_PROXY_AUTH") or "false").strip().lower() == "true"
+
+
+def disable_local_login() -> bool:
+    """Strict SSO mode — disables the native /login form entirely.
+
+    Default off, so TRUST_PROXY_AUTH=true gives a hybrid setup where the
+    form is still reachable (useful for direct LAN access while a reverse
+    proxy handles SSO at the public hostname). Set to "true" to lock down
+    to SSO only."""
+    return (os.getenv("DISABLE_LOCAL_LOGIN") or "false").strip().lower() == "true"
 
 
 def _trusted_proxy_networks():
@@ -179,13 +189,14 @@ def _trusted_header_login():
     user.last_login_at = datetime.utcnow()
     db.session.commit()
     login_user(user, remember=True)
+    session["sso"] = True
 
 
 # ---------- routes ----------
 
 @bp.route("/login", methods=["GET", "POST"])
 def login():
-    if trust_proxy_auth():
+    if disable_local_login():
         abort(404)
     if current_user.is_authenticated:
         return redirect(url_for("main.dashboard"))
@@ -203,6 +214,7 @@ def login():
         user.last_login_at = datetime.utcnow()
         db.session.commit()
         login_user(user, remember=remember)
+        session["sso"] = False
         next_url = request.args.get("next")
         return redirect(next_url or url_for("main.dashboard"))
 
@@ -212,11 +224,19 @@ def login():
 @bp.route("/logout", methods=["POST", "GET"])
 @login_required
 def logout():
-    if trust_proxy_auth():
-        # Logout is owned by the upstream IdP.
+    if disable_local_login():
+        # Strict SSO: logout is owned by the upstream IdP.
         abort(404)
+    was_sso = bool(session.get("sso"))
     logout_user()
-    flash("Signed out.", "info")
+    session.pop("sso", None)
+    if was_sso:
+        flash(
+            "Local session cleared. Sign out of your identity provider to fully sign out.",
+            "info",
+        )
+    else:
+        flash("Signed out.", "info")
     return redirect(url_for("auth.login"))
 
 
@@ -337,6 +357,8 @@ def init_app(app):
     def _inject_auth_flags():
         return {
             "trust_proxy_auth": trust_proxy_auth(),
+            "disable_local_login": disable_local_login(),
+            "sso_session": bool(session.get("sso")),
         }
 
     app.register_blueprint(bp)

@@ -127,17 +127,17 @@
               </li>
               <li><hr class="dropdown-divider"></li>
             {% endif %}
-            {% if not trust_proxy_auth %}
-              <li>
-                <form method="post" action="{{ url_for('auth.logout') }}" class="m-0">
-                  <button type="submit" class="dropdown-item">Sign out</button>
-                </form>
-              </li>
-            {% else %}
+            {% if sso_session %}
               <li>
                 <span class="dropdown-item-text small text-body-secondary">
                   Signed in via SSO. Sign out from your identity provider.
                 </span>
+              </li>
+            {% elif not disable_local_login %}
+              <li>
+                <form method="post" action="{{ url_for('auth.logout') }}" class="m-0">
+                  <button type="submit" class="dropdown-item">Sign out</button>
+                </form>
               </li>
             {% endif %}
           </ul>
