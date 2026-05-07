@@ -351,10 +351,20 @@ def create_app():
                 if attempt == 9:
                     raise
                 time.sleep(3)
-        # Additive migrations: add columns introduced after initial schema
+        # Additive migrations: add columns introduced after initial schema.
+        # After any ALTER TABLE we dispose the connection pool, otherwise
+        # MariaDB returns 1412 ("Table definition has changed") on the next
+        # SELECT against an existing connection that still has the old
+        # table definition cached.
         _run_additive_migrations(app)
+        db.session.close()
+        db.engine.dispose()
+
         _bootstrap_admin(app)
         _migrate_user_isolation(app)
+        db.session.close()
+        db.engine.dispose()
+
         _migrate_order_links()
         _backfill_color_hex(app)
         from .models import Setting
