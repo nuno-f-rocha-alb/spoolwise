@@ -32,6 +32,7 @@ class User(db.Model, UserMixin):
 
 class Setting(db.Model):
     __tablename__ = "settings"
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
     key = db.Column(db.String(64), primary_key=True)
     value = db.Column(db.String(255), nullable=False)
 
@@ -45,33 +46,61 @@ class Setting(db.Model):
     }
 
     @classmethod
-    def get_bool(cls, key, default=False):
-        row = db.session.get(cls, key)
-        if row is None:
-            return default
-        return str(row.value).strip().lower() in ("true", "1", "yes", "on")
+    def _resolve_uid(cls, user_id):
+        """Return the user_id to use, falling back to current_user when in a request."""
+        if user_id is not None:
+            return int(user_id)
+        try:
+            from flask_login import current_user
+            if current_user and current_user.is_authenticated:
+                return int(current_user.id)
+        except RuntimeError:
+            pass  # outside request context
+        return None
 
     @classmethod
-    def ensure_defaults(cls):
+    def ensure_defaults(cls, user_id):
+        """Seed missing default rows for a specific user."""
+        uid = int(user_id)
         for k, v in cls.DEFAULTS.items():
-            if db.session.get(cls, k) is None:
-                db.session.add(cls(key=k, value=v))
+            if db.session.get(cls, (uid, k)) is None:
+                db.session.add(cls(user_id=uid, key=k, value=v))
 
     @classmethod
-    def get(cls, key, cast=Decimal):
-        row = db.session.get(cls, key)
-        if row is None:
-            return None
-        return cast(row.value)
+    def get(cls, key, cast=Decimal, user_id=None):
+        """Read a setting for the current (or given) user; falls back to DEFAULTS so
+        anonymous requests (e.g. /login) still get sane values."""
+        uid = cls._resolve_uid(user_id)
+        if uid is not None:
+            row = db.session.get(cls, (uid, key))
+            if row is not None:
+                return cast(row.value)
+        default = cls.DEFAULTS.get(key)
+        return cast(default) if default is not None else None
 
     @classmethod
-    def set(cls, key, value):
-        row = db.session.get(cls, key)
+    def set(cls, key, value, user_id=None):
+        uid = cls._resolve_uid(user_id)
+        if uid is None:
+            raise RuntimeError("Setting.set requires an authenticated user")
+        row = db.session.get(cls, (uid, key))
         if row is None:
-            row = cls(key=key, value=str(value))
+            row = cls(user_id=uid, key=key, value=str(value))
             db.session.add(row)
         else:
             row.value = str(value)
+
+    @classmethod
+    def get_bool(cls, key, default=False, user_id=None):
+        uid = cls._resolve_uid(user_id)
+        if uid is not None:
+            row = db.session.get(cls, (uid, key))
+            if row is not None:
+                return str(row.value).strip().lower() in ("true", "1", "yes", "on")
+        d = cls.DEFAULTS.get(key)
+        if d is None:
+            return default
+        return str(d).strip().lower() in ("true", "1", "yes", "on")
 
 
 class Filament(db.Model):

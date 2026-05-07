@@ -178,6 +178,11 @@ def _bootstrap_admin(app):
     db.session.add(admin)
     db.session.commit()
 
+    # Seed per-user defaults for the new admin
+    from .models import Setting
+    Setting.ensure_defaults(user_id=admin.id)
+    db.session.commit()
+
     if generated:
         # Print to stdout so it lands in container logs. One-time only.
         print(
@@ -191,6 +196,29 @@ def _bootstrap_admin(app):
     else:
         app.logger.info("Spoolwise: created initial admin user %r from env.", username)
     return admin
+
+
+def _migrate_settings_per_user(app):
+    """Convert global settings to per-user settings.
+
+    The original schema had `key` as the sole primary key. To make settings
+    independent per user we widen the PK to (user_id, key). User chose option
+    C: drop existing rows and seed fresh DEFAULTS for every existing user
+    (rationale: the old global row reflected whoever last edited it, so it's
+    not safely attributable to any specific user).
+    """
+    from .models import Setting, User
+    with db.engine.connect() as conn:
+        if _has_column(conn, "settings", "user_id"):
+            return  # already migrated
+        # Old global-settings table — wipe and let create_all recreate it
+        # with the new composite-PK schema.
+        conn.execute(text("DROP TABLE settings"))
+        conn.commit()
+    db.create_all()
+    for user in User.query.all():
+        Setting.ensure_defaults(user_id=user.id)
+    db.session.commit()
 
 
 def _migrate_user_isolation(app):
@@ -387,10 +415,12 @@ def create_app():
         db.session.close()
         db.engine.dispose()
 
+        _migrate_settings_per_user(app)
+        db.session.close()
+        db.engine.dispose()
+
         _migrate_order_links()
         _backfill_color_hex(app)
-        from .models import Setting
-        Setting.ensure_defaults()
         db.session.commit()
 
     return app

@@ -166,6 +166,9 @@ def _trusted_header_login():
         )
         db.session.add(user)
         db.session.commit()
+        from .models import Setting
+        Setting.ensure_defaults(user_id=user.id)
+        db.session.commit()
     else:
         # Sync identity + admin flag from the IdP. Email / display_name follow
         # whatever Authelia sends (fall back to existing if blank). Admin flag
@@ -275,6 +278,9 @@ def users_create():
         is_active=True,
     )
     db.session.add(user)
+    db.session.commit()
+    from .models import Setting
+    Setting.ensure_defaults(user_id=user.id)
     db.session.commit()
     flash(f"User '{username}' created.", "success")
     return redirect(url_for("admin.users_list"))
