@@ -27,6 +27,13 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       SECRET_KEY: ${SECRET_KEY}
       FLASK_DEBUG: "0"
+      # Multi-user / auth
+      TRUST_PROXY_AUTH: ${TRUST_PROXY_AUTH:-false}
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_GROUP: ${ADMIN_GROUP:-admins}
     ports:
       - "5000:5000"
 

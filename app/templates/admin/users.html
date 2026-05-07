@@ -1,0 +1,254 @@
+{% extends 'base.html' %}
+
+{% block title %}Manage users · Spoolwise{% endblock %}
+
+{% block content %}
+<style>
+  .avatar-initials {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: #fff;
+    background: var(--bs-primary);
+    flex-shrink: 0;
+    user-select: none;
+  }
+  .users-table th { white-space: nowrap; }
+  .users-table td { vertical-align: middle; }
+  .users-table .actions { white-space: nowrap; }
+  .users-table .actions .btn { min-width: 44px; min-height: 32px; }
+</style>
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
+  <div>
+    <h1 class="h3 mb-1">Manage users</h1>
+    <p class="text-body-secondary mb-0">Create and administer accounts. All data is isolated per user.</p>
+  </div>
+  <button
+    type="button"
+    class="btn btn-primary"
+    data-bs-toggle="modal"
+    data-bs-target="#createUserModal">
+    + New user
+  </button>
+</div>
+
+{% if trust_proxy_auth %}
+  <div class="alert alert-info" role="alert">
+    <strong>Proxy-auth mode is active.</strong>
+    Accounts are auto-created on first sign-in via the upstream identity provider.
+    Use the form below only to pre-create a user (e.g. to grant admin rights before their first login).
+  </div>
+{% endif %}
+
+{% if users %}
+<div class="card">
+  <div class="table-responsive">
+    <table class="table users-table align-middle mb-0">
+      <thead>
+        <tr>
+          <th scope="col" style="width:48px;"></th>
+          <th scope="col">Username</th>
+          <th scope="col">Email</th>
+          <th scope="col">Role</th>
+          <th scope="col">Status</th>
+          <th scope="col">Created</th>
+          <th scope="col">Last login</th>
+          <th scope="col" class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td>
+            <span class="avatar-initials" aria-hidden="true">{{ u.initials }}</span>
+          </td>
+          <td>
+            <div class="fw-semibold">{{ u.username }}</div>
+            {% if u.display_name and u.display_name != u.username %}
+              <div class="small text-body-secondary">{{ u.display_name }}</div>
+            {% endif %}
+          </td>
+          <td class="text-body-secondary">{{ u.email or '—' }}</td>
+          <td>
+            {% if u.is_admin %}
+              <span class="badge text-bg-primary">Admin</span>
+            {% else %}
+              <span class="badge text-bg-secondary">User</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if u.is_active %}
+              <span class="badge text-bg-success">Active</span>
+            {% else %}
+              <span class="badge text-bg-secondary">Inactive</span>
+            {% endif %}
+          </td>
+          <td class="text-body-secondary small">
+            {{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '—' }}
+          </td>
+          <td class="text-body-secondary small">
+            {{ u.last_login_at.strftime('%Y-%m-%d %H:%M') if u.last_login_at else '—' }}
+          </td>
+          <td class="actions text-end">
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-secondary"
+              data-bs-toggle="modal"
+              data-bs-target="#resetPasswordModal"
+              data-username="{{ u.username }}"
+              data-action="{{ url_for('admin.users_reset_password', uid=u.id) }}"
+              title="Reset password">
+              Reset password
+            </button>
+
+            <form method="post"
+                  action="{{ url_for('admin.users_toggle_active', uid=u.id) }}"
+                  class="d-inline">
+              <button type="submit" class="btn btn-sm btn-outline-secondary">
+                {{ 'Deactivate' if u.is_active else 'Activate' }}
+              </button>
+            </form>
+
+            <form method="post"
+                  action="{{ url_for('admin.users_delete', uid=u.id) }}"
+                  class="d-inline"
+                  onsubmit="return confirm('Delete user {{ u.username|e }}? This cannot be undone.');">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <div class="card-body text-center py-5">
+    <p class="text-body-secondary mb-3">No users yet.</p>
+    <button
+      type="button"
+      class="btn btn-primary"
+      data-bs-toggle="modal"
+      data-bs-target="#createUserModal">
+      + New user
+    </button>
+  </div>
+</div>
+{% endif %}
+
+
+<!-- Create user modal -->
+<div class="modal fade" id="createUserModal" tabindex="-1" aria-labelledby="createUserModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" method="post" action="{{ url_for('admin.users_create') }}">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="createUserModalLabel">New user</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label for="new-username" class="form-label">Username</label>
+          <input type="text"
+                 class="form-control"
+                 id="new-username"
+                 name="username"
+                 autocomplete="username"
+                 autocapitalize="off"
+                 spellcheck="false"
+                 required>
+          <div class="form-text">Used for sign-in. Must be unique.</div>
+        </div>
+
+        <div class="mb-3">
+          <label for="new-display-name" class="form-label">Display name <span class="text-body-secondary">(optional)</span></label>
+          <input type="text" class="form-control" id="new-display-name" name="display_name">
+        </div>
+
+        <div class="mb-3">
+          <label for="new-email" class="form-label">Email <span class="text-body-secondary">(optional)</span></label>
+          <input type="email" class="form-control" id="new-email" name="email" autocomplete="email">
+        </div>
+
+        <div class="mb-3">
+          <label for="new-password" class="form-label">
+            Password
+            {% if trust_proxy_auth %}<span class="text-body-secondary">(optional in proxy-auth mode)</span>{% endif %}
+          </label>
+          <input type="password"
+                 class="form-control"
+                 id="new-password"
+                 name="password"
+                 autocomplete="new-password"
+                 {% if not trust_proxy_auth %}required{% endif %}>
+        </div>
+
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="new-is-admin" name="is_admin" value="1">
+          <label class="form-check-label" for="new-is-admin">Grant admin privileges</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create user</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+
+<!-- Reset password modal -->
+<div class="modal fade" id="resetPasswordModal" tabindex="-1" aria-labelledby="resetPasswordModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" method="post" id="resetPasswordForm" action="">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="resetPasswordModalLabel">Reset password</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-body-secondary">
+          Setting a new password for <strong id="resetPasswordUsername"></strong>.
+        </p>
+        <div class="mb-2">
+          <label for="reset-password" class="form-label">New password</label>
+          <input type="password"
+                 class="form-control"
+                 id="reset-password"
+                 name="password"
+                 autocomplete="new-password"
+                 required>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary">Update password</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var modal = document.getElementById('resetPasswordModal');
+    if (!modal) return;
+    modal.addEventListener('show.bs.modal', function (event) {
+      var trigger = event.relatedTarget;
+      if (!trigger) return;
+      document.getElementById('resetPasswordUsername').textContent =
+        trigger.getAttribute('data-username') || '';
+      document.getElementById('resetPasswordForm').action =
+        trigger.getAttribute('data-action') || '';
+      var pwd = document.getElementById('reset-password');
+      if (pwd) pwd.value = '';
+    });
+  })();
+</script>
+{% endblock %}

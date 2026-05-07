@@ -14,6 +14,7 @@ from flask import (
     Blueprint, render_template, request, redirect, url_for,
     flash, abort, jsonify, send_from_directory, current_app,
 )
+from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 from .models import (
@@ -27,6 +28,44 @@ from .models import (
     PlateFilament,
     OrderFile,
 )
+
+
+def _user_filament_or_404(fid):
+    f = Filament.query.filter_by(id=fid, user_id=current_user.id).first()
+    if f is None:
+        abort(404)
+    return f
+
+
+def _user_order_or_404(oid):
+    o = PrintOrder.query.filter_by(id=oid, user_id=current_user.id).first()
+    if o is None:
+        abort(404)
+    return o
+
+
+def _user_plate_or_404(pid):
+    plate = (
+        db.session.query(PrintPlate)
+        .join(PrintOrder, PrintPlate.order_id == PrintOrder.id)
+        .filter(PrintPlate.id == pid, PrintOrder.user_id == current_user.id)
+        .first()
+    )
+    if plate is None:
+        abort(404)
+    return plate
+
+
+def _user_file_or_404(fid):
+    f = (
+        db.session.query(OrderFile)
+        .join(PrintOrder, OrderFile.order_id == PrintOrder.id)
+        .filter(OrderFile.id == fid, PrintOrder.user_id == current_user.id)
+        .first()
+    )
+    if f is None:
+        abort(404)
+    return f
 
 
 def _sync_order_printed(order):
@@ -588,10 +627,12 @@ def _parse_bambu_3mf(zip_path, filaments_db=None):
 
 
 @bp.route("/")
+@login_required
 def dashboard():
-    filaments = Filament.query.order_by(Filament.name).all()
+    filaments = Filament.query.filter_by(user_id=current_user.id).order_by(Filament.name).all()
     recent = (
-        PrintOrder.query.order_by(PrintOrder.created_at.desc()).limit(5).all()
+        PrintOrder.query.filter_by(user_id=current_user.id)
+        .order_by(PrintOrder.created_at.desc()).limit(5).all()
     )
     total_stock_value = sum((f.stock_value for f in filaments), Decimal(0))
     total_stock_kg = sum((f.stock_kg for f in filaments), Decimal(0))
@@ -607,6 +648,7 @@ def dashboard():
 # ---------- Settings ----------
 
 @bp.route("/settings", methods=["GET", "POST"])
+@login_required
 def settings():
     if request.method == "POST":
         Setting.set(
@@ -639,6 +681,7 @@ def settings():
 # ---------- Filaments ----------
 
 @bp.route("/filaments")
+@login_required
 def filaments_list():
     material_filter = request.args.get("material", "all")
     brand_filter = request.args.get("brand", "all")
@@ -655,15 +698,23 @@ def filaments_list():
     sort_col = sort_map.get(sort, Filament.name)
     sort_col = sort_col.desc() if direction == "desc" else sort_col.asc()
 
-    q = Filament.query
+    q = Filament.query.filter_by(user_id=current_user.id)
     if material_filter != "all":
         q = q.filter_by(material=material_filter)
     if brand_filter != "all":
         q = q.filter_by(name=brand_filter)
 
     filaments = q.order_by(sort_col).all()
-    materials = [r[0] for r in db.session.query(Filament.material).distinct().order_by(Filament.material).all()]
-    brands = [r[0] for r in db.session.query(Filament.name).distinct().order_by(Filament.name).all()]
+    materials = [
+        r[0] for r in db.session.query(Filament.material)
+        .filter(Filament.user_id == current_user.id)
+        .distinct().order_by(Filament.material).all()
+    ]
+    brands = [
+        r[0] for r in db.session.query(Filament.name)
+        .filter(Filament.user_id == current_user.id)
+        .distinct().order_by(Filament.name).all()
+    ]
 
     return render_template(
         "filaments_list.html",
@@ -678,6 +729,7 @@ def filaments_list():
 
 
 @bp.route("/filaments/new", methods=["GET", "POST"])
+@login_required
 def filament_new():
     if request.method == "POST":
         name = request.form.get("name", "").strip()
@@ -691,7 +743,9 @@ def filament_new():
             flash("Name is required.", "danger")
             return redirect(url_for("main.filament_new"))
 
-        existing = Filament.query.filter_by(name=name, material=material, color=color).first()
+        existing = Filament.query.filter_by(
+            user_id=current_user.id, name=name, material=material, color=color,
+        ).first()
         if existing:
             flash(
                 f"Filament '{name} · {material} · {color}' already exists. "
@@ -700,7 +754,10 @@ def filament_new():
             )
             return redirect(url_for("main.filaments_list"))
 
-        f = Filament(name=name, material=material, color=color, color_hex=color_hex)
+        f = Filament(
+            user_id=current_user.id,
+            name=name, material=material, color=color, color_hex=color_hex,
+        )
         db.session.add(f)
         db.session.flush()
         if stock_g > 0 and price_per_kg > 0:
@@ -709,14 +766,23 @@ def filament_new():
         flash("Filament created.", "success")
         return redirect(url_for("main.filaments_list"))
 
-    brands = [r[0] for r in db.session.query(Filament.name).distinct().order_by(Filament.name).all()]
-    materials = [r[0] for r in db.session.query(Filament.material).distinct().order_by(Filament.material).all()]
+    brands = [
+        r[0] for r in db.session.query(Filament.name)
+        .filter(Filament.user_id == current_user.id)
+        .distinct().order_by(Filament.name).all()
+    ]
+    materials = [
+        r[0] for r in db.session.query(Filament.material)
+        .filter(Filament.user_id == current_user.id)
+        .distinct().order_by(Filament.material).all()
+    ]
     return render_template("filament_form.html", brands=brands, materials=materials)
 
 
 @bp.route("/filaments/<int:fid>/purchase", methods=["GET", "POST"])
+@login_required
 def filament_purchase(fid):
-    f = Filament.query.get_or_404(fid)
+    f = _user_filament_or_404(fid)
     if request.method == "POST":
         quantity_g = _dec(request.form.get("quantity_g"))
         price_per_kg = _dec(request.form.get("price_per_kg"))
@@ -741,8 +807,9 @@ def filament_purchase(fid):
 
 
 @bp.route("/filaments/<int:fid>/adjust", methods=["POST"])
+@login_required
 def filament_adjust(fid):
-    f = Filament.query.get_or_404(fid)
+    f = _user_filament_or_404(fid)
     new_stock = _dec(request.form.get("stock_g"), default=None)
     if new_stock is None or new_stock < 0:
         flash("Invalid stock value.", "danger")
@@ -754,8 +821,9 @@ def filament_adjust(fid):
 
 
 @bp.route("/filaments/<int:fid>/delete", methods=["POST"])
+@login_required
 def filament_delete(fid):
-    f = Filament.query.get_or_404(fid)
+    f = _user_filament_or_404(fid)
     db.session.delete(f)
     db.session.commit()
     flash("Filament deleted.", "success")
@@ -765,10 +833,11 @@ def filament_delete(fid):
 # ---------- Orders ----------
 
 @bp.route("/orders")
+@login_required
 def orders_list():
     status_filter = request.args.get("status", "all")
     type_filter = request.args.get("type", "all")
-    q = PrintOrder.query
+    q = PrintOrder.query.filter_by(user_id=current_user.id)
     if status_filter == "pending":
         q = q.filter(PrintOrder.printed_at.is_(None))
     elif status_filter == "printed":
@@ -789,8 +858,9 @@ def orders_list():
 
 
 @bp.route("/orders/new", methods=["GET", "POST"])
+@login_required
 def order_new():
-    filaments = Filament.query.order_by(Filament.name).all()
+    filaments = Filament.query.filter_by(user_id=current_user.id).order_by(Filament.name).all()
 
     if request.method == "POST":
         name = request.form.get("name", "").strip()
@@ -860,7 +930,7 @@ def order_new():
         # Validate stock (skipped in quote mode)
         filament_objs: dict = {}
         for fid, total_w in filament_usage.items():
-            f = db.session.get(Filament, fid)
+            f = Filament.query.filter_by(id=fid, user_id=current_user.id).first()
             if f is None:
                 flash("Invalid filament.", "danger")
                 return redirect(url_for("main.order_new"))
@@ -875,6 +945,7 @@ def order_new():
 
         # Create order
         order = PrintOrder(
+            user_id=current_user.id,
             name=name,
             customer=customer,
             notes=notes,
@@ -942,21 +1013,24 @@ def order_new():
 
 
 @bp.route("/orders/<int:oid>")
+@login_required
 def order_detail(oid):
-    order = PrintOrder.query.get_or_404(oid)
+    order = _user_order_or_404(oid)
     return render_template("order_detail.html", order=order)
 
 
 @bp.route("/quote/<int:oid>")
+@login_required
 def order_quote(oid):
-    order = PrintOrder.query.get_or_404(oid)
+    order = _user_order_or_404(oid)
     return render_template("quote.html", order=order)
 
 
 @bp.route("/orders/<int:oid>/edit", methods=["GET", "POST"])
+@login_required
 def order_edit(oid):
-    order = PrintOrder.query.get_or_404(oid)
-    filaments = Filament.query.order_by(Filament.name).all()
+    order = _user_order_or_404(oid)
+    filaments = Filament.query.filter_by(user_id=current_user.id).order_by(Filament.name).all()
 
     if request.method == "POST":
         name = request.form.get("name", "").strip()
@@ -1035,7 +1109,7 @@ def order_edit(oid):
         # Validate new stock against effective stock (current + what would be restored)
         filament_objs: dict = {}
         for fid, total_w in filament_usage.items():
-            f = db.session.get(Filament, fid)
+            f = Filament.query.filter_by(id=fid, user_id=current_user.id).first()
             if f is None:
                 flash("Invalid filament.", "danger")
                 return redirect(url_for("main.order_edit", oid=oid))
@@ -1181,8 +1255,9 @@ def order_edit(oid):
 
 
 @bp.route("/orders/<int:oid>/printed", methods=["POST"])
+@login_required
 def order_mark_printed(oid):
-    order = PrintOrder.query.get_or_404(oid)
+    order = _user_order_or_404(oid)
     marking = request.form.get("value") == "1"
     order.mark_printed(marking)
     now = datetime.utcnow() if marking else None
@@ -1194,8 +1269,9 @@ def order_mark_printed(oid):
 
 
 @bp.route("/orders/<int:oid>/plates/<int:pid>/toggle-printed", methods=["POST"])
+@login_required
 def plate_toggle_printed(oid, pid):
-    plate = PrintPlate.query.get_or_404(pid)
+    plate = _user_plate_or_404(pid)
     plate.printed_at = None if plate.printed_at else datetime.utcnow()
     _sync_order_printed(plate.order)
     db.session.commit()
@@ -1208,8 +1284,9 @@ def plate_toggle_printed(oid, pid):
 
 
 @bp.route("/orders/<int:oid>/plates/<int:pid>/toggle-skipped", methods=["POST"])
+@login_required
 def plate_toggle_skipped(oid, pid):
-    plate = PrintPlate.query.get_or_404(pid)
+    plate = _user_plate_or_404(pid)
     plate.is_skipped = not plate.is_skipped
     if plate.is_skipped:
         plate.printed_at = None
@@ -1236,16 +1313,18 @@ def plate_toggle_skipped(oid, pid):
 
 
 @bp.route("/orders/<int:oid>/delivered", methods=["POST"])
+@login_required
 def order_mark_delivered(oid):
-    order = PrintOrder.query.get_or_404(oid)
+    order = _user_order_or_404(oid)
     order.mark_delivered(request.form.get("value") == "1")
     db.session.commit()
     return redirect(request.referrer or url_for("main.orders_list"))
 
 
 @bp.route("/orders/<int:oid>/delete", methods=["POST"])
+@login_required
 def order_delete(oid):
-    order = PrintOrder.query.get_or_404(oid)
+    order = _user_order_or_404(oid)
     if not order.skip_stock_deduction:
         for plate in order.plates:
             if not plate.is_skipped:  # skipped plates were already restored on skip
@@ -1262,8 +1341,9 @@ def order_delete(oid):
 # ---------- Files ----------
 
 @bp.route("/orders/<int:oid>/files", methods=["POST"])
+@login_required
 def order_file_upload(oid):
-    order = PrintOrder.query.get_or_404(oid)
+    order = _user_order_or_404(oid)
     f = request.files.get("file")
     if not f or not f.filename:
         flash("No file selected.", "warning")
@@ -1319,8 +1399,9 @@ def order_file_upload(oid):
 
 
 @bp.route("/files/<int:fid>")
+@login_required
 def serve_file(fid):
-    f = OrderFile.query.get_or_404(fid)
+    f = _user_file_or_404(fid)
     upload_dir = current_app.config["UPLOAD_FOLDER"]
     # Images and 3D model files must be served without Content-Disposition so that
     # <img> tags and the Three.js XHR loader can read them inline.
@@ -1330,10 +1411,11 @@ def serve_file(fid):
 
 
 @bp.route("/files/<int:fid>/stl")
+@login_required
 def serve_file_as_stl(fid):
     """Convert a .3mf to binary STL on-the-fly for the 3D viewer."""
     from flask import Response
-    f = OrderFile.query.get_or_404(fid)
+    f = _user_file_or_404(fid)
     if f.file_type != "3mf":
         abort(400)
     path = os.path.join(current_app.config["UPLOAD_FOLDER"], f.filename)
@@ -1344,10 +1426,11 @@ def serve_file_as_stl(fid):
 
 
 @bp.route("/files/<int:fid>/plate/<int:plate_n>/stl")
+@login_required
 def serve_file_plate_stl(fid, plate_n):
     """Convert a specific plate from a .3mf to binary STL for the per-plate 3D viewer."""
     from flask import Response
-    f = OrderFile.query.get_or_404(fid)
+    f = _user_file_or_404(fid)
     if f.file_type != "3mf":
         abort(400)
     path = os.path.join(current_app.config["UPLOAD_FOLDER"], f.filename)
@@ -1358,8 +1441,9 @@ def serve_file_plate_stl(fid, plate_n):
 
 
 @bp.route("/files/<int:fid>/delete", methods=["POST"])
+@login_required
 def file_delete(fid):
-    f = OrderFile.query.get_or_404(fid)
+    f = _user_file_or_404(fid)
     oid = f.order_id
     upload_dir = current_app.config["UPLOAD_FOLDER"]
 
@@ -1383,6 +1467,7 @@ def file_delete(fid):
 
 
 @bp.route("/api/parse-3mf", methods=["POST"])
+@login_required
 def api_parse_3mf():
     f = request.files.get("file")
     if not f:
@@ -1393,7 +1478,7 @@ def api_parse_3mf():
         tmp_path = tmp.name
 
     try:
-        filaments_db = Filament.query.order_by(Filament.name).all()
+        filaments_db = Filament.query.filter_by(user_id=current_user.id).order_by(Filament.name).all()
         result = _parse_bambu_3mf(tmp_path, filaments_db)
     finally:
         try:
@@ -1407,11 +1492,15 @@ def api_parse_3mf():
 # ---------- Statistics ----------
 
 @bp.route("/stats")
+@login_required
 def stats():
     from collections import defaultdict
     import calendar
 
-    all_orders = PrintOrder.query.order_by(PrintOrder.created_at).all()
+    all_orders = (
+        PrintOrder.query.filter_by(user_id=current_user.id)
+        .order_by(PrintOrder.created_at).all()
+    )
     commercial_orders = [o for o in all_orders if not o.is_internal]
     internal_orders = [o for o in all_orders if o.is_internal]
     delivered_commercial = [o for o in commercial_orders if o.delivered_at]
@@ -1444,7 +1533,7 @@ def stats():
     )
 
     # Total filament purchased (all purchases, not just used)
-    all_purchases = FilamentPurchase.query.all()
+    all_purchases = FilamentPurchase.query.filter_by(user_id=current_user.id).all()
     total_filament_purchased_spend = sum(
         (
             (Decimal(str(p.quantity_g)) / Decimal(1000)) * Decimal(str(p.price_per_kg))
@@ -1454,7 +1543,7 @@ def stats():
     )
 
     # Current stock value
-    filaments = Filament.query.order_by(Filament.name).all()
+    filaments = Filament.query.filter_by(user_id=current_user.id).order_by(Filament.name).all()
     total_stock_value = sum((f.stock_value for f in filaments), Decimal(0))
     total_stock_kg = sum((f.stock_kg for f in filaments), Decimal(0))
 

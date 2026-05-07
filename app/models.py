@@ -1,9 +1,33 @@
 from datetime import datetime
 from decimal import Decimal
 from flask_sqlalchemy import SQLAlchemy
+from flask_login import UserMixin
 from sqlalchemy import Numeric
 
 db = SQLAlchemy()
+
+
+class User(db.Model, UserMixin):
+    __tablename__ = "users"
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(64), nullable=False, unique=True)
+    email = db.Column(db.String(255), nullable=True, unique=True)
+    display_name = db.Column(db.String(120), nullable=True)
+    password_hash = db.Column(db.String(255), nullable=True)
+    is_admin = db.Column(db.Boolean, nullable=False, default=False)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_login_at = db.Column(db.DateTime, nullable=True)
+
+    @property
+    def initials(self):
+        source = (self.display_name or self.username or "?").strip()
+        parts = [p for p in source.split() if p]
+        if not parts:
+            return "?"
+        if len(parts) == 1:
+            return parts[0][:2].upper()
+        return (parts[0][0] + parts[-1][0]).upper()
 
 
 class Setting(db.Model):
@@ -44,6 +68,7 @@ class Setting(db.Model):
 class Filament(db.Model):
     __tablename__ = "filaments"
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
     name = db.Column(db.String(120), nullable=False)
     material = db.Column(db.String(40), nullable=False, default="PLA")
     color = db.Column(db.String(40), nullable=False, default="")
@@ -57,7 +82,7 @@ class Filament(db.Model):
     )
 
     __table_args__ = (
-        db.UniqueConstraint("name", "material", "color", name="uq_filament_ident"),
+        db.UniqueConstraint("user_id", "name", "material", "color", name="uq_filament_ident"),
     )
 
     @property
@@ -82,6 +107,7 @@ class Filament(db.Model):
         self.stock_g = (self.stock_g or Decimal(0)) + quantity_g
         db.session.add(
             FilamentPurchase(
+                user_id=self.user_id,
                 filament_id=self.id,
                 quantity_g=quantity_g,
                 price_per_kg=price_per_kg,
@@ -92,6 +118,7 @@ class Filament(db.Model):
 class FilamentPurchase(db.Model):
     __tablename__ = "filament_purchases"
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
     filament_id = db.Column(db.Integer, db.ForeignKey("filaments.id"), nullable=False)
     quantity_g = db.Column(Numeric(12, 2), nullable=False)
     price_per_kg = db.Column(Numeric(12, 4), nullable=False)
@@ -101,6 +128,7 @@ class FilamentPurchase(db.Model):
 class PrintOrder(db.Model):
     __tablename__ = "print_orders"
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
     name = db.Column(db.String(160), nullable=False)
     customer = db.Column(db.String(160), nullable=True)
     notes = db.Column(db.Text, nullable=True)

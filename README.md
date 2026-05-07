@@ -34,6 +34,7 @@ A self-hosted web app to manage 3D print orders, filament inventory, costs and b
 | **Model preview** | Paste a MakerWorld / Printables / Thingiverse URL → title and cover image fetched automatically |
 | **Currency** | Configurable symbol in Settings (default `€`) |
 | **Dark / light mode** | Toggle in the navbar, persisted in `localStorage` |
+| **Multi-user** | Per-user data isolation; admin-managed accounts; optional Authelia/SSO via trusted proxy headers |
 
 ---
 
@@ -59,7 +60,16 @@ MARIADB_USER=printing
 MARIADB_PASSWORD=your_db_password
 DATABASE_URL=mysql+pymysql://printing:your_db_password@db:3306/printing_app
 SECRET_KEY=a_long_random_secret
+
+# Auth — single-user / local mode (default)
+TRUST_PROXY_AUTH=false
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=change_me_on_first_login
+ADMIN_EMAIL=
 ```
+
+> If `ADMIN_PASSWORD` is left empty on first start, the app generates a random
+> password and prints it once to the container logs. Change it after logging in.
 
 ### 2. Start
 
@@ -150,6 +160,101 @@ python run.py
 
 To update after a new image is pushed to Docker Hub:  
 **Stacks → your stack → Editor → Update the stack** (Portainer pulls the latest image).
+
+---
+
+## Multi-user
+
+Spoolwise supports multiple users with full per-user data isolation. Filaments,
+purchases and orders are scoped to the user that created them; settings
+(electricity price, printer wattage, currency, default profit %) are global.
+
+**Account management:**
+- The first time the app starts, an admin user is created from
+  `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_EMAIL`. If `ADMIN_PASSWORD` is
+  not set, a random password is generated and logged once to stdout.
+- Public registration is disabled. The admin manages users from
+  **Avatar → Manage users** (`/admin/users`): create, deactivate, reset
+  password, delete.
+- All existing data on upgrade is assigned to the bootstrap admin.
+
+---
+
+## Authelia + SWAG setup (reverse-proxy SSO)
+
+When exposing Spoolwise publicly behind [SWAG](https://docs.linuxserver.io/general/swag/)
+or any reverse proxy that performs Authelia auth_request, set:
+
+```env
+TRUST_PROXY_AUTH=true
+TRUSTED_PROXY_IPS=172.18.0.0/16   # your docker network or proxy IP(s)
+```
+
+In trusted-header mode, the native `/login` form is disabled (returns 404) and
+the app reads identity from these request headers, set by Authelia and
+forwarded by SWAG:
+
+| Header         | Purpose                                  |
+|----------------|------------------------------------------|
+| `Remote-User`  | Username (used as the local account key) |
+| `Remote-Email` | Email (optional)                         |
+| `Remote-Name`  | Display name (optional)                  |
+| `Remote-Groups`| Comma-separated groups — drives admin status |
+
+If a request arrives with `Remote-User: alice` and no local user `alice`
+exists, the account is auto-created. Email and display name follow whatever
+Authelia sends.
+
+**Admin promotion via groups.** On every request, the app reads
+`Remote-Groups` and sets `is_admin = True` if the configured admin group
+(env `ADMIN_GROUP`, default `admins`) appears in the list. Add or remove a
+user from that group in Authelia and Spoolwise mirrors it on the next
+request — no manual promotion needed. If the proxy does not send
+`Remote-Groups` at all, the admin flag is left unchanged.
+
+**SWAG nginx snippet** (e.g. `/config/nginx/proxy-confs/spoolwise.subdomain.conf`):
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name spoolwise.*;
+    include /config/nginx/ssl.conf;
+
+    location / {
+        # Forward to Authelia for auth
+        include /config/nginx/authelia-location.conf;
+
+        include /config/nginx/proxy.conf;
+        set $upstream_app spoolwise;
+        set $upstream_port 5000;
+        set $upstream_proto http;
+        proxy_pass $upstream_proto://$upstream_app:$upstream_port;
+
+        # Pass identity headers from Authelia to the app
+        auth_request_set $user   $upstream_http_remote_user;
+        auth_request_set $email  $upstream_http_remote_email;
+        auth_request_set $name   $upstream_http_remote_name;
+        auth_request_set $groups $upstream_http_remote_groups;
+        proxy_set_header Remote-User   $user;
+        proxy_set_header Remote-Email  $email;
+        proxy_set_header Remote-Name   $name;
+        proxy_set_header Remote-Groups $groups;
+    }
+}
+```
+
+**Authelia `configuration.yml`** — add an access-control rule:
+
+```yaml
+access_control:
+  rules:
+    - domain: spoolwise.example.com
+      policy: two_factor   # or one_factor
+```
+
+Defense-in-depth: `TRUSTED_PROXY_IPS` restricts the IPs from which `Remote-*`
+headers are honoured. If a request comes from any other source those headers
+are ignored. Leave empty only if you fully trust your network path.
 
 ---
 

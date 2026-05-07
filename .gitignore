@@ -10,3 +10,7 @@ __pycache__/
 # Claude Code (local only)
 .claude/
 
+# Graphify outputs (local-only knowledge-graph artefacts)
+graphify-out/
+app/graphify-out/
+

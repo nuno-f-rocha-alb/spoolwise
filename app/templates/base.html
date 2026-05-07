@@ -16,6 +16,22 @@
     #theme-toggle svg { transition: opacity 150ms ease; }
     .table > tbody > tr { transition: background-color 150ms ease; }
 
+    .nav-avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-weight: 600; font-size: 0.8rem;
+      background: var(--bs-primary); color: #fff;
+      user-select: none;
+    }
+    .navbar .dropdown-toggle.user-menu::after { display: none; }
+    .navbar .dropdown-toggle.user-menu {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.25rem 0.5rem; line-height: 1; border: 0;
+    }
+    .navbar .dropdown-toggle.user-menu:focus-visible {
+      outline: 2px solid #fff; outline-offset: 2px; border-radius: 4px;
+    }
+
     /* dark mode: replace Bootstrap's harsh yellow with muted amber */
     [data-bs-theme="dark"] {
       --bs-warning:              #c87814;
@@ -70,18 +86,63 @@
       </button>
       <div class="collapse navbar-collapse" id="nav">
         <ul class="navbar-nav me-auto">
-          {{ render_nav_item('main.dashboard', 'Dashboard') }}
-          {{ render_nav_item('main.filaments_list', 'Filaments') }}
-          {{ render_nav_item('main.orders_list', 'Orders') }}
-          {{ render_nav_item('main.stats', 'Statistics') }}
-          {{ render_nav_item('main.settings', 'Settings') }}
+          {% if current_user.is_authenticated %}
+            {{ render_nav_item('main.dashboard', 'Dashboard') }}
+            {{ render_nav_item('main.filaments_list', 'Filaments') }}
+            {{ render_nav_item('main.orders_list', 'Orders') }}
+            {{ render_nav_item('main.stats', 'Statistics') }}
+            {{ render_nav_item('main.settings', 'Settings') }}
+          {% endif %}
         </ul>
-        <a class="btn btn-primary me-2" href="{{ url_for('main.order_new') }}">+ New order</a>
-        <a class="btn btn-outline-light me-2" href="{{ url_for('main.filament_new') }}">+ Filament</a>
+        {% if current_user.is_authenticated %}
+          <a class="btn btn-primary me-2" href="{{ url_for('main.order_new') }}">+ New order</a>
+          <a class="btn btn-outline-light me-2" href="{{ url_for('main.filament_new') }}">+ Filament</a>
+        {% endif %}
         <button id="theme-toggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
           <svg id="icon-moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           <svg id="icon-sun"  xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
         </button>
+
+        {% if current_user.is_authenticated %}
+        <div class="dropdown ms-2">
+          <button class="btn btn-link dropdown-toggle user-menu p-0"
+                  type="button"
+                  data-bs-toggle="dropdown"
+                  aria-expanded="false"
+                  aria-label="Account menu">
+            <span class="nav-avatar" aria-hidden="true">{{ current_user.initials }}</span>
+            <span class="d-none d-lg-inline text-light small">
+              {{ current_user.display_name or current_user.username }}
+            </span>
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li class="dropdown-header">
+              <div class="fw-semibold text-body">{{ current_user.display_name or current_user.username }}</div>
+              <div class="small text-body-secondary">@{{ current_user.username }}</div>
+            </li>
+            <li><hr class="dropdown-divider"></li>
+            {% if current_user.is_admin %}
+              <li>
+                <a class="dropdown-item" href="{{ url_for('admin.users_list') }}">Manage users</a>
+              </li>
+              <li><hr class="dropdown-divider"></li>
+            {% endif %}
+            {% if not trust_proxy_auth %}
+              <li>
+                <form method="post" action="{{ url_for('auth.logout') }}" class="m-0">
+                  <button type="submit" class="dropdown-item">Sign out</button>
+                </form>
+              </li>
+            {% else %}
+              <li>
+                <span class="dropdown-item-text small text-body-secondary">
+                  Signed in via SSO. Sign out from your identity provider.
+                </span>
+              </li>
+            {% endif %}
+          </ul>
+        </div>
+        {% endif %}
       </div>
     </div>
   </nav>

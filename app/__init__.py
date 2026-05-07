@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 import time
 from flask import Flask
 from flask_bootstrap import Bootstrap5
@@ -9,6 +10,7 @@ from sqlalchemy.exc import OperationalError
 
 from .models import db
 from .routes import bp as main_bp
+from . import auth as auth_module
 
 
 def _run_additive_migrations(app):
@@ -106,6 +108,139 @@ def _run_additive_migrations(app):
             conn.commit()
 
 
+def _has_column(conn, table, column):
+    return conn.execute(
+        text(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = DATABASE() "
+            "AND table_name = :t AND column_name = :c"
+        ),
+        {"t": table, "c": column},
+    ).scalar() > 0
+
+
+def _has_constraint(conn, table, constraint):
+    return conn.execute(
+        text(
+            "SELECT COUNT(*) FROM information_schema.table_constraints "
+            "WHERE table_schema = DATABASE() "
+            "AND table_name = :t AND constraint_name = :c"
+        ),
+        {"t": table, "c": constraint},
+    ).scalar() > 0
+
+
+def _bootstrap_admin(app):
+    """If no users exist, create an initial admin from env vars.
+
+    Returns the admin user (existing or newly created), or None when there
+    are already users (no bootstrap needed).
+    """
+    from .models import User
+    if User.query.count() > 0:
+        return None
+
+    username = (os.getenv("ADMIN_USERNAME") or "admin").strip() or "admin"
+    email = (os.getenv("ADMIN_EMAIL") or "").strip() or None
+    raw_password = os.getenv("ADMIN_PASSWORD") or ""
+    generated = False
+    if not raw_password:
+        raw_password = secrets.token_urlsafe(18)
+        generated = True
+
+    admin = User(
+        username=username,
+        email=email,
+        display_name=username,
+        password_hash=auth_module.hash_password(raw_password),
+        is_admin=True,
+        is_active=True,
+    )
+    db.session.add(admin)
+    db.session.commit()
+
+    if generated:
+        # Print to stdout so it lands in container logs. One-time only.
+        print(
+            "=" * 72 + "\n"
+            f"  Spoolwise: created initial admin user '{username}'.\n"
+            f"  Generated password: {raw_password}\n"
+            "  CHANGE THIS PASSWORD AFTER FIRST LOGIN.\n"
+            + "=" * 72,
+            flush=True,
+        )
+    else:
+        app.logger.info("Spoolwise: created initial admin user %r from env.", username)
+    return admin
+
+
+def _migrate_user_isolation(app):
+    """Add user_id columns + FKs to existing data tables, backfill to admin,
+    then update the filaments unique constraint to include user_id.
+
+    Idempotent and safe across restarts."""
+    from .models import User
+    admin = User.query.filter_by(is_admin=True).order_by(User.id.asc()).first()
+    if admin is None:
+        # No users yet — bootstrap should have run before this. Bail safely.
+        return
+
+    with db.engine.connect() as conn:
+        for table in ("filaments", "filament_purchases", "print_orders"):
+            if not _has_column(conn, table, "user_id"):
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN user_id INT NULL"))
+                conn.commit()
+                conn.execute(
+                    text(f"UPDATE {table} SET user_id = :uid WHERE user_id IS NULL"),
+                    {"uid": admin.id},
+                )
+                conn.commit()
+                conn.execute(text(f"ALTER TABLE {table} MODIFY COLUMN user_id INT NOT NULL"))
+                conn.commit()
+                fk_name = f"fk_{table}_user_id"
+                if not _has_constraint(conn, table, fk_name):
+                    try:
+                        conn.execute(text(
+                            f"ALTER TABLE {table} ADD CONSTRAINT {fk_name} "
+                            f"FOREIGN KEY (user_id) REFERENCES users(id)"
+                        ))
+                        conn.commit()
+                    except Exception as e:  # noqa: BLE001
+                        app.logger.warning("Could not add FK %s: %s", fk_name, e)
+            else:
+                # Table already has user_id — make sure no orphans remain.
+                conn.execute(
+                    text(f"UPDATE {table} SET user_id = :uid WHERE user_id IS NULL"),
+                    {"uid": admin.id},
+                )
+                conn.commit()
+
+        # filaments unique constraint: (name, material, color) -> (user_id, name, material, color)
+        # The constraint name stays the same; we drop and recreate.
+        existing = conn.execute(text(
+            "SELECT GROUP_CONCAT(column_name ORDER BY ordinal_position) "
+            "FROM information_schema.key_column_usage "
+            "WHERE table_schema = DATABASE() "
+            "AND table_name = 'filaments' "
+            "AND constraint_name = 'uq_filament_ident'"
+        )).scalar()
+        target = "user_id,name,material,color"
+        if existing and existing != target:
+            try:
+                conn.execute(text("ALTER TABLE filaments DROP INDEX uq_filament_ident"))
+                conn.commit()
+            except Exception as e:  # noqa: BLE001
+                app.logger.warning("Could not drop old uq_filament_ident: %s", e)
+            try:
+                conn.execute(text(
+                    "ALTER TABLE filaments ADD CONSTRAINT uq_filament_ident "
+                    "UNIQUE (user_id, name, material, color)"
+                ))
+                conn.commit()
+            except Exception as e:  # noqa: BLE001
+                app.logger.warning("Could not add new uq_filament_ident: %s", e)
+
+
 def _resolve_brand(bambu, brand):
     """Resolve brand name through aliases (case-insensitive)."""
     aliases = bambu.get("_aliases", {})
@@ -188,6 +323,7 @@ def create_app():
 
     db.init_app(app)
     Bootstrap5(app)
+    auth_module.init_app(app)
 
     @app.template_filter("duration")
     def duration_filter(hours):
@@ -217,6 +353,8 @@ def create_app():
                 time.sleep(3)
         # Additive migrations: add columns introduced after initial schema
         _run_additive_migrations(app)
+        _bootstrap_admin(app)
+        _migrate_user_isolation(app)
         _migrate_order_links()
         _backfill_color_hex(app)
         from .models import Setting
