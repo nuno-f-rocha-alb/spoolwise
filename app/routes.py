@@ -500,6 +500,7 @@ def _parse_bambu_3mf(zip_path, filaments_db=None):
                 idx    = int(meta.get("index", 1))
                 pred_s = int(float(meta.get("prediction", 0) or 0))
                 print_h = round(pred_s / 3600.0, 4)
+                plate_name = (meta.get("plater_name") or meta.get("name") or "").strip()
 
                 # Per-plate thumbnail (try both zero-padded and plain index)
                 thumb_b64 = None
@@ -543,6 +544,7 @@ def _parse_bambu_3mf(zip_path, filaments_db=None):
 
                 result["plates"].append({
                     "index": idx,
+                    "name": plate_name,
                     "print_time_hours": print_h,
                     "filaments": fils,
                     "thumb_b64": thumb_b64,
@@ -608,6 +610,15 @@ def _parse_bambu_3mf(zip_path, filaments_db=None):
                             continue
                         idx = int(m.group(1))
 
+                        plate_name = ""
+                        pjson_raw = _read(pjson_name)
+                        if pjson_raw:
+                            try:
+                                pjson = json.loads(pjson_raw)
+                                plate_name = (pjson.get("name") or pjson.get("plater_name") or "").strip()
+                            except Exception:
+                                pass
+
                         thumb_b64 = None
                         for pname in (f"Metadata/plate_{idx}.png",
                                       f"Metadata/plate_{idx:02d}.png"):
@@ -644,6 +655,7 @@ def _parse_bambu_3mf(zip_path, filaments_db=None):
 
                         result["plates"].append({
                             "index": idx,
+                            "name": plate_name,
                             "print_time_hours": 0.0,
                             "filaments": fils,
                             "thumb_b64": thumb_b64,
@@ -963,6 +975,7 @@ def order_new():
             ph = _dec(request.form.get(f"plate_{i}_hours"))
             pm = _dec(request.form.get(f"plate_{i}_minutes"))
             pt = ph + pm / Decimal(60)
+            pname = (request.form.get(f"plate_{i}_name") or "").strip() or None
             fids = request.form.getlist(f"plate_{i}_filament_ids")
             weights = request.form.getlist(f"plate_{i}_weights")
 
@@ -983,7 +996,7 @@ def order_new():
                 flash(f"Plate {i + 1}: add at least one filament with weight > 0.", "danger")
                 return redirect(url_for("main.order_new"))
 
-            plates_data.append((pt, plate_items))
+            plates_data.append((pt, pname, plate_items))
 
         if not plates_data:
             flash("Add at least one plate.", "danger")
@@ -994,7 +1007,7 @@ def order_new():
         # Aggregate stock usage per filament across all plates × quantity
         qty_dec = Decimal(quantity)
         filament_usage: dict = {}
-        for _pt, plate_items in plates_data:
+        for _pt, _pname, plate_items in plates_data:
             for fid, w in plate_items:
                 filament_usage[fid] = filament_usage.get(fid, Decimal(0)) + w * qty_dec
 
@@ -1040,8 +1053,8 @@ def order_new():
             ))
 
         snapshot_price = _snapshot_price_factory(has_vat, current_user.id)
-        for pos, (pt, plate_items) in enumerate(plates_data, start=1):
-            plate = PrintPlate(order_id=order.id, position=pos, print_time_hours=pt)
+        for pos, (pt, pname, plate_items) in enumerate(plates_data, start=1):
+            plate = PrintPlate(order_id=order.id, position=pos, name=pname, print_time_hours=pt)
             db.session.add(plate)
             db.session.flush()
             for fid, w in plate_items:
@@ -1198,6 +1211,7 @@ def order_edit(oid):
             ph = _dec(request.form.get(f"plate_{i}_hours"))
             pm = _dec(request.form.get(f"plate_{i}_minutes"))
             pt = ph + pm / Decimal(60)
+            pname = (request.form.get(f"plate_{i}_name") or "").strip() or None
             fids = request.form.getlist(f"plate_{i}_filament_ids")
             weights = request.form.getlist(f"plate_{i}_weights")
 
@@ -1218,7 +1232,7 @@ def order_edit(oid):
                 flash(f"Plate {i + 1}: add at least one filament with weight > 0.", "danger")
                 return redirect(url_for("main.order_edit", oid=oid))
 
-            plates_data.append((pt, plate_items))
+            plates_data.append((pt, pname, plate_items))
 
         if not plates_data:
             flash("Add at least one plate.", "danger")
@@ -1226,7 +1240,7 @@ def order_edit(oid):
 
         qty_dec = Decimal(quantity)
         filament_usage: dict = {}
-        for _pt, plate_items in plates_data:
+        for _pt, _pname, plate_items in plates_data:
             for fid, w in plate_items:
                 filament_usage[fid] = filament_usage.get(fid, Decimal(0)) + w * qty_dec
 
@@ -1311,8 +1325,8 @@ def order_edit(oid):
 
         # Add new plates and filaments
         snapshot_price = _snapshot_price_factory(has_vat, current_user.id)
-        for pos, (pt, plate_items) in enumerate(plates_data, start=1):
-            plate = PrintPlate(order_id=order.id, position=pos, print_time_hours=pt)
+        for pos, (pt, pname, plate_items) in enumerate(plates_data, start=1):
+            plate = PrintPlate(order_id=order.id, position=pos, name=pname, print_time_hours=pt)
             db.session.add(plate)
             db.session.flush()
             for fid, w in plate_items:
@@ -1379,6 +1393,7 @@ def order_edit(oid):
         "urls": [link.url for link in order.links] or ([order.model_url] if order.model_url else []),
         "plates": [
             {
+                "name": plate.name or "",
                 "print_time_hours": float(plate.print_time_hours),
                 "filaments": [
                     {

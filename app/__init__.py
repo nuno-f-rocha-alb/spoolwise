@@ -34,10 +34,11 @@ def _run_additive_migrations(app):
             )
             conn.commit()
 
-        # print_plates.printed_at + is_skipped — per-plate print tracking
+        # print_plates.printed_at + is_skipped + name — per-plate metadata
         for col_def in [
             ("printed_at", "DATETIME NULL"),
             ("is_skipped",  "TINYINT(1) NOT NULL DEFAULT 0"),
+            ("name",        "VARCHAR(120) NULL"),
         ]:
             col_name, col_spec = col_def
             result = conn.execute(

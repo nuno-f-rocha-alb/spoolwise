@@ -310,6 +310,7 @@ class PrintPlate(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     order_id = db.Column(db.Integer, db.ForeignKey("print_orders.id"), nullable=False)
     position = db.Column(db.Integer, nullable=False, default=1)
+    name = db.Column(db.String(120), nullable=True)
     print_time_hours = db.Column(Numeric(8, 2), nullable=False)
     printed_at = db.Column(db.DateTime, nullable=True)
     is_skipped = db.Column(db.Boolean, nullable=False, default=False)

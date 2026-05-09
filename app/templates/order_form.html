@@ -113,7 +113,6 @@
       <button type="button" class="btn btn-sm btn-outline-info" id="import-3mf-btn" title="Auto-fill plates from a sliced .3mf file">
         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="me-1"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Import .3mf
       </button>
-      <button type="button" class="btn btn-sm btn-outline-primary" id="add-plate">+ Add plate</button>
     </div>
   </div>
   <input type="file" id="import-3mf-input" accept=".3mf" class="d-none">
@@ -128,7 +127,13 @@
   <div id="plates-container">
     <div class="plate-card card mb-3 border-secondary">
       <div class="card-header d-flex justify-content-between align-items-center bg-body-secondary">
-        <span class="plate-label fw-semibold">Plate 1</span>
+        <div class="d-flex align-items-center gap-2 flex-grow-1 me-2">
+          <span class="plate-label fw-semibold">Plate 1</span>
+          <input name="plate_0_name" type="text" maxlength="120"
+                 class="form-control form-control-sm plate-name"
+                 placeholder="Nome do prato (opcional)"
+                 style="max-width:280px">
+        </div>
         <button type="button" class="btn btn-sm btn-outline-danger remove-plate">× Remove</button>
       </div>
       <div class="card-body">
@@ -156,6 +161,10 @@
     </div>
   </div>
 
+  <div class="mb-3">
+    <button type="button" class="btn btn-sm btn-outline-primary" id="add-plate">+ Add plate</button>
+  </div>
+
   <div class="d-flex justify-content-between mt-3">
     {% if edit_mode %}
       <a href="{{ url_for('main.order_detail', oid=order.id) }}" class="btn btn-link text-secondary">Cancel</a>
@@ -170,7 +179,13 @@
 <template id="plate-template">
   <div class="plate-card card mb-3 border-secondary">
     <div class="card-header d-flex justify-content-between align-items-center bg-body-secondary">
-      <span class="plate-label fw-semibold">Plate N</span>
+      <div class="d-flex align-items-center gap-2 flex-grow-1 me-2">
+        <span class="plate-label fw-semibold">Plate N</span>
+        <input type="text" maxlength="120"
+               class="form-control form-control-sm plate-name"
+               placeholder="Nome do prato (opcional)"
+               style="max-width:280px">
+      </div>
       <button type="button" class="btn btn-sm btn-outline-danger remove-plate">× Remove</button>
     </div>
     <div class="card-body">
@@ -339,6 +354,8 @@ function reindex() {
     card.querySelector('.plate-label').textContent = `Plate ${pi + 1}`;
     card.querySelector('.plate-hours').name   = `plate_${pi}_hours`;
     card.querySelector('.plate-minutes').name = `plate_${pi}_minutes`;
+    const nameInput = card.querySelector('.plate-name');
+    if (nameInput) nameInput.name = `plate_${pi}_name`;
     card.querySelectorAll('.fil-id-hidden').forEach(h => h.name = `plate_${pi}_filament_ids`);
     card.querySelectorAll('.fil-weight').forEach(i => i.name = `plate_${pi}_weights`);
   });
@@ -385,6 +402,9 @@ function addPrefilledPlate(plateData) {
   const totalH = plateData.print_time_hours;
   card.querySelector('.plate-hours').value   = Math.floor(totalH);
   card.querySelector('.plate-minutes').value = Math.round((totalH % 1) * 60);
+
+  const nameInput = card.querySelector('.plate-name');
+  if (nameInput) nameInput.value = plateData.name || '';
 
   const filRows = card.querySelector('.filament-rows');
   filRows.innerHTML = '';
@@ -542,6 +562,7 @@ function initFrom3MF(data) {
 
   data.plates.forEach(plate => {
     const plateData = {
+      name: plate.name || '',
       print_time_hours: plate.print_time_hours || 0,
       filaments: [],
     };
