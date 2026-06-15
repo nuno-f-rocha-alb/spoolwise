@@ -4,6 +4,7 @@ import secrets
 import time
 from flask import Flask
 from flask_bootstrap import Bootstrap5
+from flask_cors import CORS
 from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
@@ -372,6 +373,20 @@ def create_app():
     db.init_app(app)
     Bootstrap5(app)
     auth_module.init_app(app)
+
+    # CORS: let LAN dashboards (e.g. Midgard) read the public JSON API from the
+    # browser. Scoped to /api/orders/* only, so the session-based web UI is
+    # untouched. Override the allowed origins with the CORS_ORIGINS env var
+    # (comma-separated); defaults cover the dashboard's dev + served origins.
+    cors_origins = [
+        o.strip()
+        for o in os.getenv(
+            "CORS_ORIGINS",
+            "http://localhost:8484,http://localhost:5173",
+        ).split(",")
+        if o.strip()
+    ]
+    CORS(app, resources={r"/api/orders/*": {"origins": cors_origins}})
 
     @app.template_filter("duration")
     def duration_filter(hours):

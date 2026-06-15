@@ -924,6 +924,43 @@ def orders_list():
     )
 
 
+# ---------- Public read-only API (no auth; for LAN dashboards) ----------
+# Intentionally unauthenticated: Spoolwise is a LAN/VPN-only service and this
+# exposes only non-sensitive, at-a-glance order fields (no pricing/cost). CORS
+# (configured in create_app) restricts which browser origins may read it.
+
+@bp.route("/api/orders/pending", methods=["GET"])
+def api_orders_pending():
+    """Return all not-yet-printed orders as JSON, newest first.
+
+    Consumed by external LAN dashboards (e.g. Midgard). 'Pending' mirrors the
+    web UI's own filter: printed_at IS NULL (also implies not delivered, since
+    delivery sets printed_at)."""
+    orders = (
+        PrintOrder.query
+        .filter(PrintOrder.printed_at.is_(None))
+        .order_by(PrintOrder.created_at.desc())
+        .all()
+    )
+    return jsonify({
+        "count": len(orders),
+        "orders": [
+            {
+                "id": o.id,
+                "name": o.name,
+                "customer": o.customer,
+                "quantity": o.qty,
+                "status": o.status,
+                "is_internal": o.is_internal,
+                "plates": len(o.plates),
+                "print_time_hours": float(o.total_print_time_hours),
+                "created_at": o.created_at.isoformat() if o.created_at else None,
+            }
+            for o in orders
+        ],
+    })
+
+
 @bp.route("/orders/new", methods=["GET", "POST"])
 @login_required
 def order_new():
