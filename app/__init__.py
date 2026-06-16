@@ -343,8 +343,12 @@ def _backfill_color_hex(app):
     bambu_path = os.path.join(app.root_path, "static", "bambu_colors.json")
     if not os.path.exists(bambu_path):
         return
-    with open(bambu_path) as f:
-        bambu = json.load(f)
+    try:
+        with open(bambu_path) as f:
+            bambu = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        app.logger.warning("Could not load bambu_colors.json: %s", exc)
+        return
 
     from .models import Filament
     to_update = Filament.query.filter(Filament.color_hex.is_(None)).all()
@@ -380,11 +384,10 @@ def create_app():
     # allowed by default (Access-Control-Allow-Origin: *). Set CORS_ORIGINS
     # (comma-separated) to restrict to specific origins.
     raw_origins = os.getenv("CORS_ORIGINS", "*").strip()
-    cors_origins = (
-        "*"
-        if raw_origins == "*"
-        else [o.strip() for o in raw_origins.split(",") if o.strip()]
-    )
+    parsed_origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
+    # Empty / whitespace-only CORS_ORIGINS falls back to the permissive default
+    # rather than an empty list (which Flask-CORS would treat as "block all").
+    cors_origins = "*" if raw_origins == "*" or not parsed_origins else parsed_origins
     CORS(app, resources={r"/api/orders/*": {"origins": cors_origins}})
 
     @app.template_filter("duration")

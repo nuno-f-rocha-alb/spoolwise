@@ -12,6 +12,7 @@ Two modes, switched by the TRUST_PROXY_AUTH env var:
 from datetime import datetime
 from functools import wraps
 from ipaddress import ip_address, ip_network
+from urllib.parse import urlparse
 import os
 
 from flask import (
@@ -23,6 +24,7 @@ from flask_login import (
 )
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHash
+from sqlalchemy.exc import IntegrityError
 
 from .models import User, db
 
@@ -42,6 +44,22 @@ admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 
 def hash_password(plain: str) -> str:
     return _hasher.hash(plain)
+
+
+def _is_safe_next_url(target: str | None) -> bool:
+    """Allow only same-site, relative redirect targets (open-redirect guard).
+
+    Accepts paths like ``/orders`` but rejects absolute URLs (``https://evil``)
+    and protocol-relative URLs (``//evil``)."""
+    if not target:
+        return False
+    parsed = urlparse(target)
+    return (
+        not parsed.scheme
+        and not parsed.netloc
+        and target.startswith("/")
+        and not target.startswith("//")
+    )
 
 
 def verify_password(hashed: str | None, plain: str) -> bool:
@@ -165,10 +183,19 @@ def _trusted_header_login():
             is_active=True,
         )
         db.session.add(user)
-        db.session.commit()
-        from .models import Setting
-        Setting.ensure_defaults(user_id=user.id)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # A concurrent request created the same user first. Roll back and
+            # adopt the row that won the race.
+            db.session.rollback()
+            user = User.query.filter_by(username=remote_user).first()
+            if user is None:
+                raise
+        else:
+            from .models import Setting
+            Setting.ensure_defaults(user_id=user.id)
+            db.session.commit()
     else:
         # Sync identity + admin flag from the IdP. Email / display_name follow
         # whatever Authelia sends (fall back to existing if blank). Admin flag
@@ -219,6 +246,8 @@ def login():
         login_user(user, remember=remember)
         session["sso"] = False
         next_url = request.args.get("next")
+        if not _is_safe_next_url(next_url):
+            next_url = None
         return redirect(next_url or url_for("main.dashboard"))
 
     return render_template("login.html")

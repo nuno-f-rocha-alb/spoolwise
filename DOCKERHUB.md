@@ -16,6 +16,16 @@ MARIADB_USER=printing
 MARIADB_PASSWORD=your_db_password
 DATABASE_URL=mysql+pymysql://printing:your_db_password@db:3306/printing_app
 SECRET_KEY=a_long_random_secret
+
+# Initial admin (created automatically on first start).
+# Leave ADMIN_PASSWORD empty to have one generated and printed to the logs.
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=
+ADMIN_EMAIL=
+ADMIN_GROUP=admins
+
+# Set to true only behind a trusted reverse proxy that handles SSO.
+TRUST_PROXY_AUTH=false
 ```
 
 ### 2. Create a `docker-compose.yml`
@@ -31,7 +41,7 @@ services:
       MARIADB_USER: ${MARIADB_USER}
       MARIADB_PASSWORD: ${MARIADB_PASSWORD}
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - db_data:/var/lib/mysql
     healthcheck:
@@ -48,6 +58,12 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       SECRET_KEY: ${SECRET_KEY}
+      FLASK_DEBUG: "0"
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_GROUP: ${ADMIN_GROUP:-admins}
+      TRUST_PROXY_AUTH: ${TRUST_PROXY_AUTH:-false}
     ports:
       - "5000:5000"
 
@@ -62,6 +78,11 @@ docker compose up -d
 ```
 
 App available at **http://localhost:5000**. Tables are created automatically on first start.
+
+On first start an admin user is created automatically from `ADMIN_USERNAME`
+(default `admin`). If `ADMIN_PASSWORD` is left empty, a random password is
+generated and printed once to the container logs (`docker compose logs app`) —
+sign in and change it immediately.
 
 ---
 

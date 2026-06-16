@@ -188,7 +188,7 @@
                     data-file-type="{{ f.file_type }}">3D</button>
             {% endif %}
             <form method="post" action="{{ url_for('main.file_delete', fid=f.id) }}" class="d-inline"
-                  onsubmit="return confirm('Delete {{ f.original_name }}?');">
+                  onsubmit="return confirm('Delete ' + {{ f.original_name|tojson }} + '?');">
               <button class="btn btn-sm btn-outline-danger" aria-label="Delete">×</button>
             </form>
           </div>

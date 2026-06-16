@@ -83,7 +83,7 @@ The app waits for MariaDB to be healthy before starting, then creates all tables
 | Service | URL / host |
 |---|---|
 | Web app | http://localhost:5000 |
-| MariaDB | `localhost:3306` (external port) |
+| MariaDB | `localhost:3307` (external port) |
 
 ### 3. First run
 
@@ -106,7 +106,7 @@ services:
       MARIADB_USER: ${MARIADB_USER}
       MARIADB_PASSWORD: ${MARIADB_PASSWORD}
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - db_data:/var/lib/mysql
     healthcheck:
