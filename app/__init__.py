@@ -376,16 +376,15 @@ def create_app():
 
     # CORS: let LAN dashboards (e.g. Midgard) read the public JSON API from the
     # browser. Scoped to /api/orders/* only, so the session-based web UI is
-    # untouched. Override the allowed origins with the CORS_ORIGINS env var
-    # (comma-separated); defaults cover the dashboard's dev + served origins.
-    cors_origins = [
-        o.strip()
-        for o in os.getenv(
-            "CORS_ORIGINS",
-            "http://localhost:8484,http://localhost:5173",
-        ).split(",")
-        if o.strip()
-    ]
+    # untouched. The endpoint is public and credential-less, so any origin is
+    # allowed by default (Access-Control-Allow-Origin: *). Set CORS_ORIGINS
+    # (comma-separated) to restrict to specific origins.
+    raw_origins = os.getenv("CORS_ORIGINS", "*").strip()
+    cors_origins = (
+        "*"
+        if raw_origins == "*"
+        else [o.strip() for o in raw_origins.split(",") if o.strip()]
+    )
     CORS(app, resources={r"/api/orders/*": {"origins": cors_origins}})
 
     @app.template_filter("duration")
