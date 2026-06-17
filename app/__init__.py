@@ -11,6 +11,7 @@ from sqlalchemy.exc import OperationalError
 
 from .models import db
 from .routes import bp as main_bp
+from .api import api_bp
 from . import auth as auth_module
 
 
@@ -401,6 +402,7 @@ def create_app():
         return f"{h}h {m:02d}m"
 
     app.register_blueprint(main_bp)
+    app.register_blueprint(api_bp)
 
     @app.context_processor
     def inject_currency():
