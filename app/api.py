@@ -9,21 +9,52 @@ This blueprint is additive: the existing public /api/orders/* endpoint and all
 Jinja routes are left untouched.
 """
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, abort, jsonify, request, session
 from flask_login import current_user, login_required, login_user, logout_user
+from sqlalchemy.exc import IntegrityError
 
 from .auth import (
     disable_local_login,
     trust_proxy_auth,
     verify_password,
 )
-from .models import Filament, PrintOrder, Setting, User, db
+from .models import (
+    Filament,
+    FilamentPurchase,
+    PrintOrder,
+    Setting,
+    User,
+    db,
+)
 
 LOW_STOCK_G = Decimal(100)
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
+
+
+def _dec(value, default=Decimal(0)):
+    """Coerce a JSON value (number or string, comma or dot) to Decimal.
+
+    Rejects values with more than one separator (e.g. thousand-separated
+    "1,234.56") rather than silently corrupting them."""
+    if value is None or value == "":
+        return default
+    try:
+        s = str(value).strip()
+        if s.count(",") + s.count(".") > 1:
+            return default
+        return Decimal(s.replace(",", "."))
+    except InvalidOperation:
+        return default
+
+
+def _user_filament_or_404(fid):
+    f = Filament.query.filter_by(id=fid, user_id=current_user.id).first()
+    if f is None:
+        abort(404)
+    return f
 
 
 def serialize_user(user: User) -> dict:
@@ -160,3 +191,149 @@ def dashboard():
             "recent_orders": [serialize_order_summary(o) for o in recent],
         }
     )
+
+
+# ---------- Filaments ----------
+
+def serialize_purchase(p: FilamentPurchase) -> dict:
+    return {
+        "id": p.id,
+        "quantity_g": float(p.quantity_g),
+        "price_per_kg": float(p.price_per_kg),
+        "purchased_at": p.purchased_at.isoformat() if p.purchased_at else None,
+    }
+
+
+@api_bp.get("/filaments")
+@login_required
+def filaments_list():
+    """All of the user's filaments + distinct brand/material facets. Filtering
+    and sorting are done client-side (the per-user list is small)."""
+    filaments = (
+        Filament.query.filter_by(user_id=current_user.id)
+        .order_by(Filament.name)
+        .all()
+    )
+    materials = sorted({f.material for f in filaments})
+    brands = sorted({f.name for f in filaments})
+    return jsonify(
+        {
+            "currency": Setting.get("currency_symbol", cast=str) or "€",
+            "filaments": [serialize_filament(f) for f in filaments],
+            "materials": materials,
+            "brands": brands,
+        }
+    )
+
+
+@api_bp.get("/filaments/<int:fid>")
+@login_required
+def filament_detail(fid):
+    f = _user_filament_or_404(fid)
+    purchases = (
+        FilamentPurchase.query.filter_by(filament_id=f.id)
+        .order_by(FilamentPurchase.purchased_at.desc())
+        .all()
+    )
+    return jsonify(
+        {
+            "currency": Setting.get("currency_symbol", cast=str) or "€",
+            "filament": serialize_filament(f),
+            "purchases": [serialize_purchase(p) for p in purchases],
+        }
+    )
+
+
+@api_bp.post("/filaments")
+@login_required
+def filament_create():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    material = (data.get("material") or "PLA").strip()
+    color = (data.get("color") or "").strip()
+    color_hex = (data.get("color_hex") or "").strip() or None
+    stock_g = _dec(data.get("stock_g"))
+    price_per_kg = _dec(data.get("price_per_kg"))
+
+    if not name:
+        return jsonify({"error": "Name is required."}), 400
+
+    existing = Filament.query.filter_by(
+        user_id=current_user.id, name=name, material=material, color=color
+    ).first()
+    if existing:
+        return (
+            jsonify(
+                {
+                    "error": (
+                        f"Filament '{name} · {material} · {color}' already exists. "
+                        "Use Buy to add more stock."
+                    ),
+                    "existing_id": existing.id,
+                }
+            ),
+            409,
+        )
+
+    f = Filament(
+        user_id=current_user.id,
+        name=name,
+        material=material,
+        color=color,
+        color_hex=color_hex,
+    )
+    db.session.add(f)
+    db.session.flush()
+    if stock_g > 0 and price_per_kg > 0:
+        f.add_purchase(stock_g, price_per_kg)
+    db.session.commit()
+    return jsonify({"filament": serialize_filament(f)}), 201
+
+
+@api_bp.post("/filaments/<int:fid>/purchase")
+@login_required
+def filament_purchase(fid):
+    f = _user_filament_or_404(fid)
+    data = request.get_json(silent=True) or {}
+    quantity_g = _dec(data.get("quantity_g"))
+    price_per_kg = _dec(data.get("price_per_kg"))
+    if quantity_g <= 0 or price_per_kg <= 0:
+        return jsonify({"error": "Quantity and price must be positive."}), 400
+    f.add_purchase(quantity_g, price_per_kg)
+    db.session.commit()
+    return jsonify({"filament": serialize_filament(f)})
+
+
+@api_bp.post("/filaments/<int:fid>/adjust")
+@login_required
+def filament_adjust(fid):
+    f = _user_filament_or_404(fid)
+    data = request.get_json(silent=True) or {}
+    new_stock = _dec(data.get("stock_g"), default=None)
+    if new_stock is None or new_stock < 0:
+        return jsonify({"error": "Invalid stock value."}), 400
+    # Inventory correction only — does NOT touch the weighted-average price.
+    f.stock_g = new_stock
+    db.session.commit()
+    return jsonify({"filament": serialize_filament(f)})
+
+
+@api_bp.delete("/filaments/<int:fid>")
+@login_required
+def filament_delete(fid):
+    f = _user_filament_or_404(fid)
+    db.session.delete(f)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Referenced by one or more orders (plate filaments) — the FK blocks it.
+        db.session.rollback()
+        return (
+            jsonify(
+                {
+                    "error": "This filament is used by one or more orders and can't be deleted."
+                }
+            ),
+            409,
+        )
+    return jsonify({"ok": True})

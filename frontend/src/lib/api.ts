@@ -13,7 +13,7 @@ export class ApiError extends Error {
   }
 }
 
-type Body = Record<string, unknown> | undefined
+type Body = object | undefined
 
 async function request<T>(
   method: string,

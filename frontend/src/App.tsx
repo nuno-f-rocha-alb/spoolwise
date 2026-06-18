@@ -6,6 +6,9 @@ import { ProtectedRoute } from "@/components/ProtectedRoute"
 import { ThemeProvider } from "@/hooks/useTheme"
 import ComingSoon from "@/pages/ComingSoon"
 import Dashboard from "@/pages/Dashboard"
+import Filaments from "@/pages/Filaments"
+import FilamentForm from "@/pages/FilamentForm"
+import FilamentPurchase from "@/pages/FilamentPurchase"
 import Login from "@/pages/Login"
 
 const queryClient = new QueryClient({
@@ -27,13 +30,11 @@ export default function App() {
             <Route element={<ProtectedRoute />}>
               <Route element={<AppLayout />}>
                 <Route path="/" element={<Dashboard />} />
+                <Route path="/filaments" element={<Filaments />} />
+                <Route path="/filaments/new" element={<FilamentForm />} />
                 <Route
-                  path="/filaments"
-                  element={<ComingSoon title="Filaments" />}
-                />
-                <Route
-                  path="/filaments/new"
-                  element={<ComingSoon title="New filament" />}
+                  path="/filaments/:id/purchase"
+                  element={<FilamentPurchase />}
                 />
                 <Route
                   path="/orders"

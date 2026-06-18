@@ -25,3 +25,37 @@ export interface LoginResponse {
   disable_local_login: boolean
   sso_session: boolean
 }
+
+export interface Filament {
+  id: number
+  name: string
+  material: string
+  color: string
+  color_hex: string | null
+  stock_g: number
+  stock_kg: number
+  avg_price_per_kg: number
+  stock_value: number
+  is_zero_stock: boolean
+  is_low_stock: boolean
+}
+
+export interface FilamentPurchase {
+  id: number
+  quantity_g: number
+  price_per_kg: number
+  purchased_at: string | null
+}
+
+export interface FilamentsResponse {
+  currency: string
+  filaments: Filament[]
+  materials: string[]
+  brands: string[]
+}
+
+export interface FilamentDetailResponse {
+  currency: string
+  filament: Filament
+  purchases: FilamentPurchase[]
+}
