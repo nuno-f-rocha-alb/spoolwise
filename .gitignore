@@ -14,3 +14,6 @@ __pycache__/
 graphify-out/
 app/graphify-out/
 
+
+# Dev-only compose override
+docker-compose.override.yml

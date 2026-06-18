@@ -1,0 +1,22 @@
+# VCS / tooling
+.git
+.gitignore
+.claude
+
+# Frontend build artifacts and deps (the SPA is built separately; Flask only
+# needs to serve the compiled assets, added later in the deploy step)
+frontend/node_modules
+frontend/dist
+
+# Python caches / local envs
+**/__pycache__
+*.pyc
+.venv
+venv
+.env
+.env.*
+
+# Repo extras not needed in the image
+docs
+graphify-out
+app/graphify-out

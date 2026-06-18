@@ -9,6 +9,7 @@ This blueprint is additive: the existing public /api/orders/* endpoint and all
 Jinja routes are left untouched.
 """
 from datetime import datetime
+from decimal import Decimal
 
 from flask import Blueprint, jsonify, request, session
 from flask_login import current_user, login_required, login_user, logout_user
@@ -18,7 +19,9 @@ from .auth import (
     trust_proxy_auth,
     verify_password,
 )
-from .models import Setting, User, db
+from .models import Filament, PrintOrder, Setting, User, db
+
+LOW_STOCK_G = Decimal(100)
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -91,3 +94,69 @@ def auth_logout():
     logout_user()
     session.pop("sso", None)
     return jsonify({"ok": True, "was_sso": was_sso})
+
+
+def serialize_filament(f: Filament) -> dict:
+    stock_g = Decimal(str(f.stock_g or 0))
+    return {
+        "id": f.id,
+        "name": f.name,
+        "material": f.material,
+        "color": f.color,
+        "color_hex": f.color_hex,
+        "stock_g": float(stock_g),
+        "stock_kg": float(f.stock_kg),
+        "avg_price_per_kg": float(f.avg_price_per_kg or 0),
+        "stock_value": float(f.stock_value),
+        "is_zero_stock": stock_g <= 0,
+        "is_low_stock": 0 < stock_g <= LOW_STOCK_G,
+    }
+
+
+def serialize_order_summary(o: PrintOrder) -> dict:
+    return {
+        "id": o.id,
+        "name": o.name,
+        "customer": o.customer,
+        "created_at": o.created_at.isoformat() if o.created_at else None,
+        "is_internal": o.is_internal,
+        "status": o.status,
+        "total_cost": float(o.total_cost),
+        "sell_price": float(o.sell_price),
+    }
+
+
+@api_bp.get("/dashboard")
+@login_required
+def dashboard():
+    """Inventory snapshot + recent orders for the SPA dashboard (per-user)."""
+    filaments = (
+        Filament.query.filter_by(user_id=current_user.id)
+        .order_by(Filament.name)
+        .all()
+    )
+    recent = (
+        PrintOrder.query.filter_by(user_id=current_user.id)
+        .order_by(PrintOrder.created_at.desc())
+        .limit(5)
+        .all()
+    )
+    total_stock_value = sum((f.stock_value for f in filaments), Decimal(0))
+    total_stock_kg = sum((f.stock_kg for f in filaments), Decimal(0))
+    low_stock_count = sum(
+        1 for f in filaments if Decimal(str(f.stock_g or 0)) <= LOW_STOCK_G
+    )
+
+    return jsonify(
+        {
+            "currency": Setting.get("currency_symbol", cast=str) or "€",
+            "totals": {
+                "stock_kg": float(total_stock_kg),
+                "stock_value": float(total_stock_value),
+                "filament_count": len(filaments),
+                "low_stock_count": low_stock_count,
+            },
+            "filaments": [serialize_filament(f) for f in filaments],
+            "recent_orders": [serialize_order_summary(o) for o in recent],
+        }
+    )

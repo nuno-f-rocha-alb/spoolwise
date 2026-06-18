@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom"
 
+import { AppLayout } from "@/components/AppLayout"
 import { ProtectedRoute } from "@/components/ProtectedRoute"
 import { ThemeProvider } from "@/hooks/useTheme"
+import ComingSoon from "@/pages/ComingSoon"
 import Dashboard from "@/pages/Dashboard"
 import Login from "@/pages/Login"
 
@@ -23,7 +25,38 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route element={<ProtectedRoute />}>
-              <Route path="/" element={<Dashboard />} />
+              <Route element={<AppLayout />}>
+                <Route path="/" element={<Dashboard />} />
+                <Route
+                  path="/filaments"
+                  element={<ComingSoon title="Filaments" />}
+                />
+                <Route
+                  path="/filaments/new"
+                  element={<ComingSoon title="New filament" />}
+                />
+                <Route
+                  path="/orders"
+                  element={<ComingSoon title="Orders" />}
+                />
+                <Route
+                  path="/orders/new"
+                  element={<ComingSoon title="New order" />}
+                />
+                <Route
+                  path="/orders/:id"
+                  element={<ComingSoon title="Order detail" />}
+                />
+                <Route path="/stats" element={<ComingSoon title="Statistics" />} />
+                <Route
+                  path="/settings"
+                  element={<ComingSoon title="Settings" />}
+                />
+                <Route
+                  path="/admin/users"
+                  element={<ComingSoon title="Manage users" />}
+                />
+              </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
