@@ -84,3 +84,88 @@ export interface OrdersResponse {
   retail_mode_enabled: boolean
   orders: OrderListItem[]
 }
+
+export interface PlateItem {
+  id: number
+  filament_id: number
+  weight_g: number
+  price_per_kg_snapshot: number
+  cost: number
+  filament: {
+    id: number
+    name: string
+    material: string
+    color: string
+    color_hex: string | null
+  } | null
+}
+
+export interface Plate {
+  id: number
+  position: number
+  name: string | null
+  print_time_hours: number
+  printed_at: string | null
+  is_skipped: boolean
+  filament_cost: number
+  electricity_cost: number
+  total_cost: number
+  items: PlateItem[]
+}
+
+export interface OrderLinkItem {
+  id: number
+  url: string
+  title: string | null
+  image: string | null
+}
+
+export interface OrderFileItem {
+  id: number
+  filename: string
+  original_name: string
+  file_type: string
+  is_plate_thumb: boolean
+  plate_index: number | null
+  is_viewable_3d: boolean
+  is_image: boolean
+}
+
+export interface OrderDetail {
+  id: number
+  name: string
+  customer: string | null
+  notes: string | null
+  created_at: string | null
+  printed_at: string | null
+  delivered_at: string | null
+  status: string
+  is_internal: boolean
+  skip_stock_deduction: boolean
+  has_vat: boolean
+  vat_rate_pct: number | null
+  quantity: number
+  profit_pct: number
+  printer_power_watts: number
+  electricity_price_per_kwh: number
+  total_print_time_hours: number
+  unit_print_time_hours: number
+  filament_cost: number
+  electricity_cost: number
+  total_cost: number
+  unit_cost: number
+  sell_price: number
+  unit_sell_price: number
+  vat_amount: number
+  sell_price_with_vat: number
+  profit_value: number
+  plates: Plate[]
+  links: OrderLinkItem[]
+  files: OrderFileItem[]
+}
+
+export interface OrderDetailResponse {
+  currency: string
+  retail_mode_enabled: boolean
+  order: OrderDetail
+}

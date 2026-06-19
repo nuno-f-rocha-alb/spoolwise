@@ -11,6 +11,7 @@ import FilamentForm from "@/pages/FilamentForm"
 import FilamentPurchase from "@/pages/FilamentPurchase"
 import Login from "@/pages/Login"
 import Orders from "@/pages/Orders"
+import OrderDetail from "@/pages/OrderDetail"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -42,10 +43,7 @@ export default function App() {
                   path="/orders/new"
                   element={<ComingSoon title="New order" />}
                 />
-                <Route
-                  path="/orders/:id"
-                  element={<ComingSoon title="Order detail" />}
-                />
+                <Route path="/orders/:id" element={<OrderDetail />} />
                 <Route
                   path="/orders/:id/edit"
                   element={<ComingSoon title="Edit order" />}

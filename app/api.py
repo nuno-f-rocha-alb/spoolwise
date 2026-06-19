@@ -8,12 +8,16 @@ cookie is first-party in both cases.
 This blueprint is additive: the existing public /api/orders/* endpoint and all
 Jinja routes are left untouched.
 """
+import base64
+import os
+import uuid
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
-from flask import Blueprint, abort, jsonify, request, session
+from flask import Blueprint, abort, current_app, jsonify, request, session
 from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy.exc import IntegrityError
+from werkzeug.utils import secure_filename
 
 from .auth import (
     disable_local_login,
@@ -23,10 +27,18 @@ from .auth import (
 from .models import (
     Filament,
     FilamentPurchase,
+    OrderFile,
     PrintOrder,
     Setting,
     User,
     db,
+)
+from .routes import (
+    _ALLOWED_UPLOAD_EXTS,
+    _parse_bambu_3mf,
+    _sync_order_printed,
+    _user_file_or_404,
+    _user_plate_or_404,
 )
 
 LOW_STOCK_G = Decimal(100)
@@ -409,3 +421,263 @@ def order_delete(oid):
     db.session.delete(order)
     db.session.commit()
     return jsonify({"ok": True, "stock_restored": restored})
+
+
+# ---------- Order detail ----------
+
+def serialize_plate_item(it) -> dict:
+    f = it.filament
+    return {
+        "id": it.id,
+        "filament_id": it.filament_id,
+        "weight_g": float(it.weight_g),
+        "price_per_kg_snapshot": float(it.price_per_kg_snapshot),
+        "cost": float(it.cost),
+        "filament": {
+            "id": f.id,
+            "name": f.name,
+            "material": f.material,
+            "color": f.color,
+            "color_hex": f.color_hex,
+        }
+        if f
+        else None,
+    }
+
+
+def serialize_plate(p) -> dict:
+    return {
+        "id": p.id,
+        "position": p.position,
+        "name": p.name,
+        "print_time_hours": float(p.print_time_hours),
+        "printed_at": p.printed_at.isoformat() if p.printed_at else None,
+        "is_skipped": p.is_skipped,
+        "filament_cost": float(p.filament_cost),
+        "electricity_cost": float(p.electricity_cost),
+        "total_cost": float(p.total_cost),
+        "items": [serialize_plate_item(it) for it in p.items],
+    }
+
+
+def serialize_link(link) -> dict:
+    return {"id": link.id, "url": link.url, "title": link.title, "image": link.image}
+
+
+def serialize_file(f) -> dict:
+    return {
+        "id": f.id,
+        "filename": f.filename,
+        "original_name": f.original_name,
+        "file_type": f.file_type,
+        "is_plate_thumb": f.is_plate_thumb,
+        "plate_index": f.plate_index,
+        "is_viewable_3d": f.is_viewable_3d,
+        "is_image": f.is_image,
+    }
+
+
+def serialize_order_detail(o: PrintOrder) -> dict:
+    return {
+        "id": o.id,
+        "name": o.name,
+        "customer": o.customer,
+        "notes": o.notes,
+        "created_at": o.created_at.isoformat() if o.created_at else None,
+        "printed_at": o.printed_at.isoformat() if o.printed_at else None,
+        "delivered_at": o.delivered_at.isoformat() if o.delivered_at else None,
+        "status": o.status,
+        "is_internal": o.is_internal,
+        "skip_stock_deduction": o.skip_stock_deduction,
+        "has_vat": o.has_vat,
+        "vat_rate_pct": float(o.vat_rate_pct) if o.vat_rate_pct is not None else None,
+        "quantity": o.qty,
+        "profit_pct": float(o.profit_pct),
+        "printer_power_watts": float(o.printer_power_watts),
+        "electricity_price_per_kwh": float(o.electricity_price_per_kwh),
+        "total_print_time_hours": float(o.total_print_time_hours),
+        "unit_print_time_hours": float(o.unit_print_time_hours),
+        "filament_cost": float(o.filament_cost),
+        "electricity_cost": float(o.electricity_cost),
+        "total_cost": float(o.total_cost),
+        "unit_cost": float(o.unit_cost),
+        "sell_price": float(o.sell_price),
+        "unit_sell_price": float(o.unit_sell_price),
+        "vat_amount": float(o.vat_amount),
+        "sell_price_with_vat": float(o.sell_price_with_vat),
+        "profit_value": float(o.profit_value),
+        "plates": [serialize_plate(p) for p in o.plates],
+        "links": [serialize_link(link) for link in o.links],
+        "files": [serialize_file(f) for f in o.files],
+    }
+
+
+@api_bp.get("/orders/<int:oid>")
+@login_required
+def order_detail(oid):
+    o = _user_order_or_404(oid)
+    return jsonify(
+        {
+            "currency": Setting.get("currency_symbol", cast=str) or "€",
+            "retail_mode_enabled": Setting.get_bool("retail_mode_enabled"),
+            "order": serialize_order_detail(o),
+        }
+    )
+
+
+@api_bp.post("/orders/<int:oid>/plates/<int:pid>/toggle-printed")
+@login_required
+def plate_toggle_printed(oid, pid):
+    plate = _user_plate_or_404(pid)
+    if plate.order_id != oid:
+        abort(404)
+    plate.printed_at = None if plate.printed_at else datetime.utcnow()
+    _sync_order_printed(plate.order)
+    db.session.commit()
+    order = plate.order
+    return jsonify(
+        {
+            "plate_printed": plate.printed_at is not None,
+            "order_status": order.status,
+            "order_printed_at": order.printed_at.isoformat()
+            if order.printed_at
+            else None,
+        }
+    )
+
+
+@api_bp.post("/orders/<int:oid>/plates/<int:pid>/toggle-skipped")
+@login_required
+def plate_toggle_skipped(oid, pid):
+    plate = _user_plate_or_404(pid)
+    if plate.order_id != oid:
+        abort(404)
+    plate.is_skipped = not plate.is_skipped
+    if plate.is_skipped:
+        plate.printed_at = None
+
+    # Restore stock when skipping, deduct again when unskipping (× quantity).
+    if not plate.order.skip_stock_deduction:
+        qty = Decimal(str(plate.order.quantity or 1))
+        for it in plate.items:
+            if it.filament is not None:
+                delta = Decimal(str(it.weight_g)) * qty
+                if plate.is_skipped:
+                    it.filament.stock_g = Decimal(str(it.filament.stock_g or 0)) + delta
+                else:
+                    it.filament.stock_g = Decimal(str(it.filament.stock_g or 0)) - delta
+
+    _sync_order_printed(plate.order)
+    db.session.commit()
+    order = plate.order
+    return jsonify(
+        {
+            "plate_skipped": plate.is_skipped,
+            "plate_printed": plate.printed_at is not None,
+            "order_status": order.status,
+        }
+    )
+
+
+@api_bp.post("/orders/<int:oid>/printed")
+@login_required
+def order_mark_printed(oid):
+    order = _user_order_or_404(oid)
+    marking = bool((request.get_json(silent=True) or {}).get("value"))
+    order.mark_printed(marking)
+    now = datetime.utcnow() if marking else None
+    for plate in order.plates:
+        if not plate.is_skipped:
+            plate.printed_at = now
+    db.session.commit()
+    return jsonify({"status": order.status})
+
+
+@api_bp.post("/orders/<int:oid>/delivered")
+@login_required
+def order_mark_delivered(oid):
+    order = _user_order_or_404(oid)
+    order.mark_delivered(bool((request.get_json(silent=True) or {}).get("value")))
+    db.session.commit()
+    return jsonify({"status": order.status})
+
+
+@api_bp.post("/orders/<int:oid>/files")
+@login_required
+def order_file_upload(oid):
+    order = _user_order_or_404(oid)
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "No file selected."}), 400
+
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in _ALLOWED_UPLOAD_EXTS:
+        return jsonify({"error": f"File type .{ext} not supported."}), 400
+
+    upload_dir = current_app.config["UPLOAD_FOLDER"]
+    stored = f"{uuid.uuid4()}.{ext}"
+    dest = os.path.join(upload_dir, stored)
+    f.save(dest)
+
+    db.session.add(
+        OrderFile(
+            order_id=oid,
+            filename=stored,
+            original_name=secure_filename(f.filename),
+            file_type=ext,
+        )
+    )
+
+    warning = None
+    if ext == "3mf":
+        parsed = _parse_bambu_3mf(dest)
+        for plate in parsed.get("plates", []):
+            thumb_b64 = plate.get("thumb_b64")
+            if not thumb_b64:
+                continue
+            try:
+                _, data = thumb_b64.split(",", 1)
+                thumb_bytes = base64.b64decode(data)
+                thumb_stored = f"{uuid.uuid4()}.png"
+                with open(os.path.join(upload_dir, thumb_stored), "wb") as tf:
+                    tf.write(thumb_bytes)
+                db.session.add(
+                    OrderFile(
+                        order_id=oid,
+                        filename=thumb_stored,
+                        original_name=f"plate_{plate['index']}_thumbnail.png",
+                        file_type="png",
+                        is_plate_thumb=True,
+                        plate_index=plate["index"],
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                current_app.logger.warning("plate thumbnail save failed: %s", exc)
+        warning = parsed.get("warning")
+
+    db.session.commit()
+    return jsonify({"order": serialize_order_detail(order), "warning": warning})
+
+
+@api_bp.delete("/files/<int:fid>")
+@login_required
+def file_delete(fid):
+    f = _user_file_or_404(fid)
+    oid = f.order_id
+    upload_dir = current_app.config["UPLOAD_FOLDER"]
+
+    to_delete = [f]
+    if f.file_type == "3mf":
+        # Mirrors the Jinja route: a 3MF's extracted plate thumbnails go with it.
+        thumbs = OrderFile.query.filter_by(order_id=oid, is_plate_thumb=True).all()
+        to_delete.extend(thumbs)
+
+    for entry in to_delete:
+        try:
+            os.remove(os.path.join(upload_dir, entry.filename))
+        except OSError:
+            pass
+        db.session.delete(entry)
+
+    db.session.commit()
+    return jsonify({"ok": True})
