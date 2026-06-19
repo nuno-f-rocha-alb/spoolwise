@@ -59,3 +59,28 @@ export interface FilamentDetailResponse {
   filament: Filament
   purchases: FilamentPurchase[]
 }
+
+export interface OrderListItem {
+  id: number
+  name: string
+  customer: string | null
+  created_at: string | null
+  is_internal: boolean
+  skip_stock_deduction: boolean
+  has_vat: boolean
+  vat_rate_pct: number | null
+  quantity: number
+  status: string
+  plate_count: number
+  total_print_time_hours: number
+  total_cost: number
+  sell_price: number
+  sell_price_with_vat: number
+  profit_value: number
+}
+
+export interface OrdersResponse {
+  currency: string
+  retail_mode_enabled: boolean
+  orders: OrderListItem[]
+}

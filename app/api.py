@@ -337,3 +337,75 @@ def filament_delete(fid):
             409,
         )
     return jsonify({"ok": True})
+
+
+# ---------- Orders ----------
+
+def _user_order_or_404(oid):
+    o = PrintOrder.query.filter_by(id=oid, user_id=current_user.id).first()
+    if o is None:
+        abort(404)
+    return o
+
+
+def serialize_order_list(o: PrintOrder) -> dict:
+    """Row-level fields for the orders table (no plate/file detail)."""
+    return {
+        "id": o.id,
+        "name": o.name,
+        "customer": o.customer,
+        "created_at": o.created_at.isoformat() if o.created_at else None,
+        "is_internal": o.is_internal,
+        "skip_stock_deduction": o.skip_stock_deduction,
+        "has_vat": o.has_vat,
+        "vat_rate_pct": float(o.vat_rate_pct) if o.vat_rate_pct is not None else None,
+        "quantity": o.qty,
+        "status": o.status,
+        "plate_count": len(o.plates),
+        "total_print_time_hours": float(o.total_print_time_hours),
+        "total_cost": float(o.total_cost),
+        "sell_price": float(o.sell_price),
+        "sell_price_with_vat": float(o.sell_price_with_vat),
+        "profit_value": float(o.profit_value),
+    }
+
+
+@api_bp.get("/orders")
+@login_required
+def orders_list():
+    """All of the user's orders (newest first). Status/type filtering is done
+    client-side."""
+    orders = (
+        PrintOrder.query.filter_by(user_id=current_user.id)
+        .order_by(PrintOrder.created_at.desc())
+        .all()
+    )
+    return jsonify(
+        {
+            "currency": Setting.get("currency_symbol", cast=str) or "€",
+            "retail_mode_enabled": Setting.get_bool("retail_mode_enabled"),
+            "orders": [serialize_order_list(o) for o in orders],
+        }
+    )
+
+
+@api_bp.delete("/orders/<int:oid>")
+@login_required
+def order_delete(oid):
+    """Delete an order, restoring stock for any plates that deducted it
+    (mirrors the Jinja order_delete)."""
+    order = _user_order_or_404(oid)
+    restored = not order.skip_stock_deduction
+    if restored:
+        qty = Decimal(str(order.quantity or 1))
+        for plate in order.plates:
+            if not plate.is_skipped:  # skipped plates already restored on skip
+                for it in plate.items:
+                    if it.filament is not None:
+                        it.filament.stock_g = (
+                            Decimal(str(it.filament.stock_g or 0))
+                            + Decimal(str(it.weight_g)) * qty
+                        )
+    db.session.delete(order)
+    db.session.commit()
+    return jsonify({"ok": True, "stock_restored": restored})
