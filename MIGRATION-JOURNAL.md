@@ -214,6 +214,30 @@ to the cleanup (alongside the existing mesh/controls/renderer disposal; also add
 `scene.remove(mesh)`). The lights hold no GPU resources, so they need no disposal. Verified with
 `npm run build`.
 
+### §17 — Post-migration cleanup: CI hardening + Jinja scrub
+Knocked out the deferred follow-ups.
+- **CI (`docker.yml`):** bumped the Node-20-deprecated actions (`checkout@v4→v7`, `login-action@v3→v4`,
+  `build-push-action@v5→v7`); added an immutable `:${{ github.sha }}` tag alongside `:latest` (so any
+  build can be pinned/rolled back to); added `workflow_dispatch` so any branch can be rebuilt on demand
+  (e.g. to republish a rollback image from `backup/jinja-main`). Workflow-only changes don't match the
+  `paths` filter, so they're verified on the next code-triggered build.
+- **Jinja scrub:** removed all now-dead server-rendered code. `routes.py` 1877→784 (kept the helper
+  functions `api.py` imports + the 5 non-HTML routes `main_bp` still serves: public `/api/orders/pending`,
+  `/api/parse-3mf`, `/files/*`). `auth.py` 397→217 (dropped the `/login`,`/logout` + admin-users Jinja
+  handlers and their blueprints; kept the login manager, password/SSO helpers, `admin_required`,
+  `_trusted_header_login`). Deleted `app/templates/` (13 files). Dropped 3 unused deps — `Bootstrap-Flask`,
+  `WTForms`, `Flask-WTF` (the Jinja forms were plain HTML, no `FlaskForm`) — plus the `Bootstrap5` wiring,
+  the `duration` template filter, and the `inject_currency`/auth-flags context processors. `main_bp` now
+  holds only the 5 kept routes, so `__init__` registers it directly again (dropped the §14 `add_url_rule`
+  workaround). Trimmed every newly-unused import.
+  **Method/root cause:** the keep/drop functions were interleaved across a 1877-line file, so I sliced by
+  verified line-range (preserving kept code byte-for-byte) rather than hand-editing — far less risk of
+  nicking a live helper. Boundaries + unused imports were confirmed by grep, then the whole thing by
+  runtime checks.
+- **Verified:** `create_app()` boots (38 url rules); full endpoint matrix on `:5000` green (SPA root +
+  deep-link serve, public pending, authed me/dashboard/stats/admin, file 404); and a **fresh image build**
+  with the trimmed `requirements.txt` imports cleanly with Bootstrap-Flask/WTForms/Flask-WTF **absent**.
+
 ## Open issues (not yet addressed)
 - **3MF thumbnail deletion** (`file_delete`) removes *all* of an order's plate thumbnails, not just the
   deleted 3MF's — mirrors a pre-existing Jinja bug. Proper fix needs an `OrderFile.parent_file_id` column +
@@ -238,6 +262,6 @@ app; every route is real (no `ComingSoon` left).
 **Migration complete and shipped (§15).** All pages migrated, the production build is wired (§14), and
 `main` is now the SPA version (`bf18786`) with `nunobifes/spoolwise:latest` rebuilt and pushed by CI.
 The old Jinja app is preserved on `backup/jinja-main`. Awaiting the Portainer container recreate.
-Possible follow-ups (all deferred, non-blocking): SHA/version image tags for cleaner rollback; scrub the
-now-dead Jinja route code + templates; bump the Node-20 GitHub Actions; the two long-standing open issues
-below.
+Post-migration cleanup done (§17): SHA image tags + manual dispatch, Node-20 action bumps, and the full
+Jinja scrub (dead routes/templates/deps removed). Only the two long-standing open issues below remain,
+both pre-existing and deferred by design.

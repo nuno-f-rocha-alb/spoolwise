@@ -1,27 +1,22 @@
-"""Auth: login manager, password hashing, trusted-header SSO, login/logout routes.
+"""Auth: login manager, password hashing, trusted-header SSO.
 
+The SPA owns the login UI and calls the JSON endpoints in ``api.py``
+(``/api/auth/*``); this module provides the shared pieces both modes need.
 Two modes, switched by the TRUST_PROXY_AUTH env var:
 
-* ``false`` (default) — native login form at ``/login``; passwords hashed with
-  argon2-cffi.
+* ``false`` (default) — native username/password login (passwords hashed with
+  argon2-cffi).
 * ``true`` — identity comes from ``Remote-User`` / ``Remote-Email`` /
-  ``Remote-Name`` headers set by an upstream Authelia + reverse proxy. Native
-  login form is disabled. ``TRUSTED_PROXY_IPS`` (CSV) restricts which client
-  IPs are allowed to set those headers.
+  ``Remote-Name`` headers set by an upstream Authelia + reverse proxy.
+  ``TRUSTED_PROXY_IPS`` (CSV) restricts which client IPs may set those headers.
 """
 from datetime import datetime
 from functools import wraps
 from ipaddress import ip_address, ip_network
-from urllib.parse import urlparse
 import os
 
-from flask import (
-    Blueprint, abort, current_app, flash, g, redirect, render_template,
-    request, session, url_for,
-)
-from flask_login import (
-    LoginManager, current_user, login_required, login_user, logout_user,
-)
+from flask import abort, current_app, request, session
+from flask_login import LoginManager, current_user, login_user
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHash
 from sqlalchemy.exc import IntegrityError
@@ -39,30 +34,12 @@ login_manager.login_message_category = "warning"
 
 _hasher = PasswordHasher()
 
-bp = Blueprint("auth", __name__)
-admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 
 
 # ---------- password helpers ----------
 
 def hash_password(plain: str) -> str:
     return _hasher.hash(plain)
-
-
-def _is_safe_next_url(target: str | None) -> bool:
-    """Allow only same-site, relative redirect targets (open-redirect guard).
-
-    Accepts paths like ``/orders`` but rejects absolute URLs (``https://evil``)
-    and protocol-relative URLs (``//evil``)."""
-    if not target:
-        return False
-    parsed = urlparse(target)
-    return (
-        not parsed.scheme
-        and not parsed.netloc
-        and target.startswith("/")
-        and not target.startswith("//")
-    )
 
 
 def verify_password(hashed: str | None, plain: str) -> bool:
@@ -224,163 +201,6 @@ def _trusted_header_login():
     login_user(user, remember=True)
     session["sso"] = True
 
-
-# ---------- routes ----------
-
-@bp.route("/login", methods=["GET", "POST"])
-def login():
-    if disable_local_login():
-        abort(404)
-    if current_user.is_authenticated:
-        return redirect(url_for("main.dashboard"))
-
-    if request.method == "POST":
-        username = (request.form.get("username") or "").strip()
-        password = request.form.get("password") or ""
-        remember = bool(request.form.get("remember"))
-
-        user = User.query.filter_by(username=username).first()
-        if user is None or not user.is_active or not verify_password(user.password_hash, password):
-            flash("Invalid credentials.", "danger")
-            return render_template("login.html", username=username), 401
-
-        user.last_login_at = datetime.utcnow()
-        db.session.commit()
-        login_user(user, remember=remember)
-        session["sso"] = False
-        next_url = request.args.get("next")
-        if not _is_safe_next_url(next_url):
-            next_url = None
-        return redirect(next_url or url_for("main.dashboard"))
-
-    return render_template("login.html")
-
-
-@bp.route("/logout", methods=["POST", "GET"])
-@login_required
-def logout():
-    if disable_local_login():
-        # Strict SSO: logout is owned by the upstream IdP.
-        abort(404)
-    was_sso = bool(session.get("sso"))
-    logout_user()
-    session.pop("sso", None)
-    if was_sso:
-        flash(
-            "Local session cleared. Sign out of your identity provider to fully sign out.",
-            "info",
-        )
-    else:
-        flash("Signed out.", "info")
-    return redirect(url_for("auth.login"))
-
-
-@admin_bp.route("/users", methods=["GET"])
-@admin_required
-def users_list():
-    users = User.query.order_by(User.created_at.asc()).all()
-    return render_template("admin/users.html", users=users)
-
-
-@admin_bp.route("/users/create", methods=["POST"])
-@admin_required
-def users_create():
-    username = (request.form.get("username") or "").strip()
-    email = (request.form.get("email") or "").strip() or None
-    display_name = (request.form.get("display_name") or "").strip() or None
-    password = request.form.get("password") or ""
-    is_admin = bool(request.form.get("is_admin"))
-
-    if not username:
-        flash("Username is required.", "danger")
-        return redirect(url_for("admin.users_list"))
-    if User.query.filter_by(username=username).first():
-        flash(f"User '{username}' already exists.", "warning")
-        return redirect(url_for("admin.users_list"))
-    if not trust_proxy_auth() and not password:
-        flash("Password is required when not in proxy-auth mode.", "danger")
-        return redirect(url_for("admin.users_list"))
-
-    user = User(
-        username=username,
-        email=email,
-        display_name=display_name,
-        password_hash=hash_password(password) if password else None,
-        is_admin=is_admin,
-        is_active=True,
-    )
-    db.session.add(user)
-    db.session.commit()
-    from .models import Setting
-    Setting.ensure_defaults(user_id=user.id)
-    db.session.commit()
-    flash(f"User '{username}' created.", "success")
-    return redirect(url_for("admin.users_list"))
-
-
-@admin_bp.route("/users/<int:uid>/toggle-active", methods=["POST"])
-@admin_required
-def users_toggle_active(uid):
-    user = db.session.get(User, uid) or abort(404)
-    if user.id == current_user.id:
-        flash("You cannot deactivate your own account.", "warning")
-        return redirect(url_for("admin.users_list"))
-    user.is_active = not user.is_active
-    db.session.commit()
-    flash(
-        f"User '{user.username}' {'activated' if user.is_active else 'deactivated'}.",
-        "success",
-    )
-    return redirect(url_for("admin.users_list"))
-
-
-@admin_bp.route("/users/<int:uid>/reset-password", methods=["POST"])
-@admin_required
-def users_reset_password(uid):
-    user = db.session.get(User, uid) or abort(404)
-    new_password = request.form.get("password") or ""
-    if not new_password:
-        flash("Password cannot be empty.", "danger")
-        return redirect(url_for("admin.users_list"))
-    user.password_hash = hash_password(new_password)
-    db.session.commit()
-    flash(f"Password for '{user.username}' updated.", "success")
-    return redirect(url_for("admin.users_list"))
-
-
-@admin_bp.route("/users/<int:uid>/delete", methods=["POST"])
-@admin_required
-def users_delete(uid):
-    user = db.session.get(User, uid) or abort(404)
-    if user.id == current_user.id:
-        flash("You cannot delete your own account.", "warning")
-        return redirect(url_for("admin.users_list"))
-    if user.is_admin:
-        remaining_admins = User.query.filter(
-            User.is_admin.is_(True), User.id != user.id
-        ).count()
-        if remaining_admins == 0:
-            flash("Cannot delete the last remaining admin.", "warning")
-            return redirect(url_for("admin.users_list"))
-
-    # Refuse if the user owns data — admin should deactivate instead, or
-    # transfer/delete the data first.
-    from .models import Filament, PrintOrder
-    if (
-        Filament.query.filter_by(user_id=user.id).first()
-        or PrintOrder.query.filter_by(user_id=user.id).first()
-    ):
-        flash(
-            f"Cannot delete '{user.username}': they still own filaments or orders. "
-            "Deactivate the account instead, or remove their data first.",
-            "warning",
-        )
-        return redirect(url_for("admin.users_list"))
-
-    db.session.delete(user)
-    db.session.commit()
-    flash(f"User '{user.username}' deleted.", "success")
-    return redirect(url_for("admin.users_list"))
 
 
 def init_app(app):

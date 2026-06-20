@@ -4,14 +4,13 @@ import secrets
 import time
 from flask import Flask, abort, send_from_directory
 from werkzeug.utils import safe_join
-from flask_bootstrap import Bootstrap5
 from flask_cors import CORS
 from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from .models import db
-from . import routes
+from .routes import bp as main_bp
 from .api import api_bp
 from . import auth as auth_module
 
@@ -397,14 +396,12 @@ def create_app():
         "mysql+pymysql://printing:printing@localhost:3306/printing_app",
     )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-    app.config["BOOTSTRAP_BOOTSWATCH_THEME"] = "flatly"
     app.config["MAX_CONTENT_LENGTH"] = 150 * 1024 * 1024  # 150 MB max upload
     upload_dir = os.path.join(app.root_path, "uploads")
     os.makedirs(upload_dir, exist_ok=True)
     app.config["UPLOAD_FOLDER"] = upload_dir
 
     db.init_app(app)
-    Bootstrap5(app)
     auth_module.init_app(app)
 
     # CORS: let LAN dashboards (e.g. Midgard) read the public JSON API from the
@@ -419,43 +416,13 @@ def create_app():
     cors_origins = "*" if raw_origins == "*" or not parsed_origins else parsed_origins
     CORS(app, resources={r"/api/orders/*": {"origins": cors_origins}})
 
-    @app.template_filter("duration")
-    def duration_filter(hours):
-        from decimal import Decimal
-        h = int(hours)
-        m = round((Decimal(str(hours)) - h) * 60)
-        if m == 60:
-            h += 1
-            m = 0
-        return f"{h}h {m:02d}m"
-
-    # SPA cutover: the React app (app/spa) owns the UI. We register the JSON API
-    # plus the few non-HTML endpoints the SPA still needs from the legacy module,
-    # and serve the built SPA for everything else. The Jinja page blueprints
-    # (main_bp here, and the auth/admin blueprints in auth.py) are intentionally
-    # no longer registered.
+    # SPA cutover: the React app (app/spa) owns the UI. main_bp now holds only
+    # the non-HTML endpoints the SPA still needs (public /api/orders/pending,
+    # /api/parse-3mf, file serving); api_bp is the SPA's JSON API; everything
+    # else is the built SPA. The Jinja auth/admin blueprints are not registered.
     app.register_blueprint(api_bp)
-
-    app.add_url_rule("/api/orders/pending", view_func=routes.api_orders_pending)
-    app.add_url_rule("/files/<int:fid>", view_func=routes.serve_file)
-    app.add_url_rule("/files/<int:fid>/stl", view_func=routes.serve_file_as_stl)
-    app.add_url_rule(
-        "/files/<int:fid>/plate/<int:plate_n>/stl",
-        view_func=routes.serve_file_plate_stl,
-    )
-    app.add_url_rule(
-        "/api/parse-3mf", view_func=routes.api_parse_3mf, methods=["POST"]
-    )
-
+    app.register_blueprint(main_bp)
     _register_spa(app)
-
-    @app.context_processor
-    def inject_currency():
-        from .models import Setting
-        return {
-            "currency": Setting.get("currency_symbol", cast=str) or "€",
-            "retail_mode_enabled": Setting.get_bool("retail_mode_enabled"),
-        }
 
     with app.app_context():
         for attempt in range(10):
