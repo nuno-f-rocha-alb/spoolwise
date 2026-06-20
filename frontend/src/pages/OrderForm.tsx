@@ -1,5 +1,5 @@
 import * as React from "react"
-import { FileUp, Plus, X } from "lucide-react"
+import { Copy, FileUp, Plus, X } from "lucide-react"
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -127,7 +127,10 @@ function FilamentRowEditor({
             <SelectContent>
               {colors.map((f) => (
                 <SelectItem key={f.id} value={String(f.id)}>
-                  {f.color}
+                  <span className="flex items-center gap-2">
+                    <FilamentSwatch hex={f.color_hex} color={f.color} />
+                    {f.color}
+                  </span>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -261,6 +264,16 @@ export default function OrderForm() {
 
   function updatePlate(i: number, patch: Partial<PlateForm>) {
     setPlates((ps) => ps.map((p, idx) => (idx === i ? { ...p, ...patch } : p)))
+  }
+  function duplicatePlate(i: number) {
+    setPlates((ps) => {
+      const src = ps[i]
+      const copy: PlateForm = {
+        ...src,
+        filaments: src.filaments.map((f) => ({ ...f })),
+      }
+      return [...ps.slice(0, i + 1), copy, ...ps.slice(i + 1)]
+    })
   }
   function updateRow(pi: number, ri: number, row: FilRow) {
     setPlates((ps) =>
@@ -552,16 +565,26 @@ export default function OrderForm() {
                     onChange={(e) => updatePlate(pi, { name: e.target.value })}
                   />
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="text-destructive hover:bg-destructive/10"
-                  disabled={plates.length <= 1}
-                  onClick={() => setPlates((ps) => ps.filter((_, j) => j !== pi))}
-                >
-                  <X className="size-4" /> Remove plate
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => duplicatePlate(pi)}
+                  >
+                    <Copy className="size-4" /> Duplicate
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="text-destructive hover:bg-destructive/10"
+                    disabled={plates.length <= 1}
+                    onClick={() => setPlates((ps) => ps.filter((_, j) => j !== pi))}
+                  >
+                    <X className="size-4" /> Remove plate
+                  </Button>
+                </div>
               </div>
 
               <div className="flex items-center gap-2">

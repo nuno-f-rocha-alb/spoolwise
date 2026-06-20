@@ -88,6 +88,14 @@ app-wide). Verified live: load → prefill → edit → save → persist, light 
 (set electricity/watts to 0) — a *test-harness* issue, not a code bug; the UI save path is correct. Lesson:
 reset seed state via the UI or a file-based `--data @`, not inline shell JSON containing non-ASCII.
 
+### §10 — Order-form polish (swatches + duplicate plate)
+User feedback: the colour swatch belongs on the *order-create* per-plate colour dropdown (it had been
+added to the new-filament form in §5). Added `FilamentSwatch` to each option there. Also added a
+**Duplicate plate** button (deep-copies a plate's time + filament rows, inserts it right after) — handy for
+multi-copy orders. Verified live: swatches render in the cascade; Duplicate produces an exact Plate 2 copy.
+Adopted the **ponytail** minimalism ladder as the default coding lens from here on (write only what the task
+needs; reuse stdlib/native/installed/one-liners; never cut validation/security/a11y).
+
 ## Open issues (not yet addressed)
 - **3MF thumbnail deletion** (`file_delete`) removes *all* of an order's plate thumbnails, not just the
   deleted 3MF's — mirrors a pre-existing Jinja bug. Proper fix needs an `OrderFile.parent_file_id` column +
