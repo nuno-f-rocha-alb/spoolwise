@@ -206,6 +206,14 @@ Cutover shipped.
 - Minor CI annotation: the GitHub Actions (`checkout@v4`, `build-push-action@v5`, `login-action@v3`)
   are on the Node-20 deprecation list — a version bump someday, non-blocking.
 
+### §16 — STLViewer THREE.js disposal (post-migration cleanup)
+Fixed the pre-existing GPU-memory leak flagged in §14's CodeRabbit pass: the 3D viewer's `GridHelper`
+was never released, so each open/close of the viewer leaked its geometry + material. Hoisted `grid` to
+the effect scope and added `scene.remove(grid)` + `grid.geometry.dispose()` + `grid.material.dispose()`
+to the cleanup (alongside the existing mesh/controls/renderer disposal; also added the missing
+`scene.remove(mesh)`). The lights hold no GPU resources, so they need no disposal. Verified with
+`npm run build`.
+
 ## Open issues (not yet addressed)
 - **3MF thumbnail deletion** (`file_delete`) removes *all* of an order's plate thumbnails, not just the
   deleted 3MF's — mirrors a pre-existing Jinja bug. Proper fix needs an `OrderFile.parent_file_id` column +

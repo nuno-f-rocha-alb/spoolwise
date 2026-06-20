@@ -70,6 +70,7 @@ export function STLViewer({
     window.addEventListener("resize", onResize)
 
     let mesh: THREE.Mesh | null = null
+    let grid: THREE.GridHelper | null = null
     const loader = new STLLoader()
     loader.load(
       url,
@@ -100,7 +101,7 @@ export function STLViewer({
         controls.target.set(0, 0, 0)
         controls.update()
 
-        const grid = new THREE.GridHelper(maxDim * 10, 40, 0x4444aa, 0x222244)
+        grid = new THREE.GridHelper(maxDim * 10, 40, 0x4444aa, 0x222244)
         grid.position.y = box.min.y
         grid.material.transparent = true
         grid.material.opacity = 0.55
@@ -124,8 +125,14 @@ export function STLViewer({
       window.removeEventListener("resize", onResize)
       controls.dispose()
       if (mesh) {
+        scene.remove(mesh)
         mesh.geometry.dispose()
         ;(mesh.material as THREE.Material).dispose()
+      }
+      if (grid) {
+        scene.remove(grid)
+        grid.geometry.dispose()
+        ;(grid.material as THREE.Material).dispose()
       }
       renderer.dispose()
     }
