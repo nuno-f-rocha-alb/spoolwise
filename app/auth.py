@@ -30,7 +30,10 @@ from .models import User, db
 
 
 login_manager = LoginManager()
-login_manager.login_view = "auth.login"
+# No login_view: the SPA owns auth, so unauthenticated access to a protected
+# endpoint returns 401 (the SPA's /api/auth/me drives the redirect to /login
+# client-side) rather than redirecting to a server-rendered login page.
+login_manager.login_view = None
 login_manager.login_message = "Please sign in to continue."
 login_manager.login_message_category = "warning"
 
@@ -381,20 +384,14 @@ def users_delete(uid):
 
 
 def init_app(app):
-    """Wire login manager + before_request hook + auth blueprint into the app."""
+    """Wire login manager + trusted-proxy SSO hook into the app.
+
+    The Jinja auth/admin blueprints are no longer registered — the SPA owns
+    login (`/api/auth/*`) and user management (`/api/admin/users*`). The
+    `_sso_hook` is app-level, so hybrid auth (native login on LAN/VPN +
+    Authelia header login externally) keeps working regardless."""
     login_manager.init_app(app)
 
     @app.before_request
     def _sso_hook():
         _trusted_header_login()
-
-    @app.context_processor
-    def _inject_auth_flags():
-        return {
-            "trust_proxy_auth": trust_proxy_auth(),
-            "disable_local_login": disable_local_login(),
-            "sso_session": bool(session.get("sso")),
-        }
-
-    app.register_blueprint(bp)
-    app.register_blueprint(admin_bp)

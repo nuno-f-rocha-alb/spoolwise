@@ -272,7 +272,7 @@ export default function Statistics() {
                 <YAxis tick={axisTick} tickFormatter={(v) => `${v}`} width={48} />
                 <Tooltip
                   {...tooltipProps}
-                  formatter={(v: number) => m(v)}
+                  formatter={(v) => m(Number(v))}
                 />
                 <Legend wrapperStyle={{ fontSize: 13 }} />
                 <Bar
@@ -330,7 +330,7 @@ export default function Statistics() {
                   width={150}
                   tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
                 />
-                <Tooltip {...tooltipProps} formatter={(v: number) => m(v)} />
+                <Tooltip {...tooltipProps} formatter={(v) => m(Number(v))} />
                 <Bar dataKey="stock_value" radius={[0, 4, 4, 0]}>
                   {data.stock.map((f) => (
                     <Cell key={f.id} fill={f.color_hex || STOCK_FALLBACK} />

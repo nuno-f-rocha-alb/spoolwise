@@ -281,7 +281,7 @@ function CreateUserDialog({
       username: string
       display_name: string | null
       email: string | null
-      password: string
+      password?: string
       is_admin: boolean
     },
     onError: (msg: string) => void

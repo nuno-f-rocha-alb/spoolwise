@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "app/**"
+      - "frontend/**"
       - "requirements.txt"
       - "Dockerfile"
       - "run.py"

@@ -17,3 +17,6 @@ app/graphify-out/
 
 # Dev-only compose override
 docker-compose.override.yml
+
+# Built SPA — produced inside the Docker build (multi-stage), never committed
+app/spa/

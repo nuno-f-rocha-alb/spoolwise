@@ -160,6 +160,35 @@ Ported the admin user-management UI (`admin/users.html` + the `admin_bp` routes,
   reset ok), confirmed the delete dialog + delete after the FK fix; cleaned up to the seed baseline
   (only `admin`). No console errors.
 
+### §14 — Production build + SPA cutover (serve same-origin from Flask)
+Wired the built SPA into the container and flipped the UI from Jinja to React.
+- **Multi-stage Dockerfile:** `node:20` stage runs `npm ci && npm run build`; the Python stage
+  `COPY --from=spa /spa/dist ./app/spa`. `.gitignore` + `.dockerignore` ignore `app/spa` (built in-image).
+- **Flask now serves the SPA:** `_register_spa` adds a catch-all (`/`, `/<path:path>`) that serves real
+  built assets from `app/spa` and otherwise returns `index.html` (client-side routing → deep links +
+  refresh work). `/api`, `/files`, `/static` have more-specific routes and win; undefined `/api/*`/
+  `/files/*` paths are guarded to 404 rather than leaking `index.html`.
+- **Jinja retired:** the three server-rendered blueprints (`main_bp`, and auth `bp` + `admin_bp`) are no
+  longer registered. The 5 non-HTML endpoints the SPA still needs (`/api/orders/pending`, `/api/parse-3mf`,
+  `/files/<id>` + `/stl` + `/plate/<n>/stl`) are re-registered from the routes module via `add_url_rule`.
+  The app-level `_sso_hook` `before_request` stays, so hybrid auth (local + Authelia) is unaffected. The
+  Jinja route code + templates remain in the tree as dead code (helper functions in `routes.py` are still
+  imported by `api.py`); scrubbing them is a separate cleanup.
+- **Root cause — anon 500:** with the auth blueprint gone, `login_manager.login_view = "auth.login"` made
+  `login_required` redirect to a dead endpoint → `url_for` 500 on every protected route for anonymous
+  requests. Fixed by `login_view = None` → clean **401** (the SPA's `/api/auth/me` drives the client-side
+  redirect to `/login`). Verified anon `/files/x`, `/api/dashboard` → 401, not 500.
+- **Root cause — vacuous typechecks:** my earlier `npx tsc --noEmit` passes were checking nothing — the
+  frontend uses a **composite/references** tsconfig, so the real typecheck is `tsc -b` (what `npm run build`
+  runs). The prod build surfaced 3 genuine type errors in already-committed code (two Recharts `Tooltip`
+  formatter signatures, one `password?:` optionality in the user-create dialog). Fixed all three.
+  **Lesson:** verify the frontend with `npm run build`, never bare `tsc --noEmit`.
+- **CI:** `docker.yml` `paths:` now includes `frontend/**` (else a frontend-only change wouldn't rebuild).
+  `docker-compose.yml` needs no change — same image/port/env; hybrid-auth env vars already wired.
+- **Verified:** curl matrix on `:5000` (SPA routes 200, API JSON 401/200, public pending 200, undefined
+  api 404, anon protected 401); browser login through the Flask-served build → dashboard with live data
+  (same-origin, no proxy); the multi-stage image builds and contains `app/spa`.
+
 ## Open issues (not yet addressed)
 - **3MF thumbnail deletion** (`file_delete`) removes *all* of an order's plate thumbnails, not just the
   deleted 3MF's — mirrors a pre-existing Jinja bug. Proper fix needs an `OrderFile.parent_file_id` column +
@@ -181,5 +210,7 @@ Ported the admin user-management UI (`admin/users.html` + the `admin_bp` routes,
 **All pages migrated and verified:** Login, Dashboard, Filaments, Orders (list/detail/form),
 Settings, both Quote pages, Statistics, and Admin/users. The SPA is at feature parity with the Jinja
 app; every route is real (no `ComingSoon` left).
-**Remaining work (not a page):** build the SPA into Flask static + update Dockerfile/compose for prod
-(single container, same-origin). Until then the Jinja app stays the shippable one on `main`.
+**Migration complete.** All pages migrated AND the production build is wired (§14): the multi-stage image
+builds the SPA and Flask serves it same-origin; Jinja is retired. Verified end-to-end on `:5000` + as a
+built Docker image. Ready to promote `feature/react-spa-migration` → `main` (after backing up the Jinja
+`main` to a branch) so CI publishes the new image.

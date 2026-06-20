@@ -3,10 +3,11 @@
 .gitignore
 .claude
 
-# Frontend build artifacts and deps (the SPA is built separately; Flask only
-# needs to serve the compiled assets, added later in the deploy step)
+# Frontend deps + build artifacts — the SPA is built fresh inside the image's
+# Node stage, then copied into app/spa, so none of these belong in the context.
 frontend/node_modules
 frontend/dist
+app/spa
 
 # Python caches / local envs
 **/__pycache__
