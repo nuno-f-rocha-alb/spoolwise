@@ -20,7 +20,9 @@ from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
 
 from .auth import (
+    admin_required,
     disable_local_login,
+    hash_password,
     trust_proxy_auth,
     verify_password,
 )
@@ -1244,3 +1246,123 @@ def stats():
             "stock": stock,
         }
     )
+
+
+# ---------- Admin: users ----------
+
+def serialize_admin_user(u: User) -> dict:
+    return {
+        "id": u.id,
+        "username": u.username,
+        "display_name": u.display_name,
+        "email": u.email,
+        "is_admin": bool(u.is_admin),
+        "is_active": bool(u.is_active),
+        "initials": u.initials,
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+    }
+
+
+@api_bp.get("/admin/users")
+@admin_required
+def admin_users_list():
+    users = User.query.order_by(User.created_at.asc()).all()
+    return jsonify(
+        {
+            "trust_proxy_auth": trust_proxy_auth(),
+            "users": [serialize_admin_user(u) for u in users],
+        }
+    )
+
+
+@api_bp.post("/admin/users")
+@admin_required
+def admin_users_create():
+    """Port of admin.users_create — password optional only in proxy-auth mode."""
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    email = (data.get("email") or "").strip() or None
+    display_name = (data.get("display_name") or "").strip() or None
+    password = data.get("password") or ""
+
+    if not username:
+        return jsonify({"error": "Username is required."}), 400
+    if User.query.filter_by(username=username).first():
+        return jsonify({"error": f"User '{username}' already exists."}), 409
+    if not trust_proxy_auth() and not password:
+        return jsonify({"error": "Password is required when not in proxy-auth mode."}), 400
+
+    user = User(
+        username=username,
+        email=email,
+        display_name=display_name,
+        password_hash=hash_password(password) if password else None,
+        is_admin=bool(data.get("is_admin")),
+        is_active=True,
+    )
+    db.session.add(user)
+    db.session.commit()
+    Setting.ensure_defaults(user_id=user.id)
+    db.session.commit()
+    return jsonify({"user": serialize_admin_user(user)}), 201
+
+
+@api_bp.post("/admin/users/<int:uid>/toggle-active")
+@admin_required
+def admin_users_toggle_active(uid):
+    user = db.session.get(User, uid) or abort(404)
+    if user.id == current_user.id:
+        return jsonify({"error": "You cannot deactivate your own account."}), 400
+    user.is_active = not user.is_active
+    db.session.commit()
+    return jsonify({"user": serialize_admin_user(user)})
+
+
+@api_bp.post("/admin/users/<int:uid>/reset-password")
+@admin_required
+def admin_users_reset_password(uid):
+    user = db.session.get(User, uid) or abort(404)
+    new_password = (request.get_json(silent=True) or {}).get("password") or ""
+    if not new_password:
+        return jsonify({"error": "Password cannot be empty."}), 400
+    user.password_hash = hash_password(new_password)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@api_bp.delete("/admin/users/<int:uid>")
+@admin_required
+def admin_users_delete(uid):
+    """Port of admin.users_delete — refuses self, last admin, or data owners."""
+    user = db.session.get(User, uid) or abort(404)
+    if user.id == current_user.id:
+        return jsonify({"error": "You cannot delete your own account."}), 400
+    if user.is_admin:
+        remaining = User.query.filter(
+            User.is_admin.is_(True), User.id != user.id
+        ).count()
+        if remaining == 0:
+            return jsonify({"error": "Cannot delete the last remaining admin."}), 400
+    if (
+        Filament.query.filter_by(user_id=user.id).first()
+        or PrintOrder.query.filter_by(user_id=user.id).first()
+    ):
+        return (
+            jsonify(
+                {
+                    "error": (
+                        f"Cannot delete '{user.username}': they still own filaments "
+                        "or orders. Deactivate the account instead, or remove their "
+                        "data first."
+                    )
+                }
+            ),
+            409,
+        )
+    # The user's Setting rows are their own config (settings.user_id has no DB
+    # cascade) — remove them first, else the FK blocks the delete with a raw 500.
+    Setting.query.filter_by(user_id=user.id).delete()
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({"ok": True})

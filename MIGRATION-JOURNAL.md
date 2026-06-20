@@ -139,6 +139,27 @@ Ported the business-analytics page (`stats.html` + its Chart.js scripts).
   KPI row renders; the stock chart shows real per-filament colors. Then **reverted to the seed
   baseline** (retail off, all 3 orders back to pending, 0 delivered). No console warnings.
 
+### §13 — Admin: manage users (final page)
+Ported the admin user-management UI (`admin/users.html` + the `admin_bp` routes, which live in
+`auth.py`, not `routes.py` — there was never a `/admin/users` route in `routes.py`).
+- **Backend:** 5 JSON endpoints under `/api/admin/users*` (list/create/toggle-active/reset-password/
+  delete), reusing `admin_required` + `hash_password` from `auth.py`. Faithful guards: password
+  required unless proxy-auth, duplicate→409, can't deactivate/delete self, can't delete the last
+  admin, can't delete a user who still owns filaments/orders→409.
+- **Bug found + fixed (not pure parity):** deleting a freshly-created user 500'd — `settings.user_id`
+  has no DB cascade and `ensure_defaults` always seeds Setting rows, so the FK blocked the delete.
+  The Jinja `users_delete` has the **same latent bug** (identical unguarded `delete(user)`). Fixed by
+  cascade-deleting the user's own Setting rows first (they're their config, unlike orders/filaments
+  which the guard protects). Same precedent as the §5 filament raw-500→friendly-error fix.
+- **Frontend:** `Users.tsx` — table + create/reset dialogs built on the **installed** radix
+  `alert-dialog` as the modal shell (no new `@radix-ui/react-dialog` dep), plain `useState`/`FormData`
+  forms (no RHF/Zod for 5 fields — backend validates). Self-row Deactivate/Delete disabled.
+  **Deleted dead `ComingSoon.tsx`** — every route is now real.
+- **Verified live (light + dark):** created `testuser` through the UI dialog (list refreshed),
+  exercised every guard via the API (self 400s, duplicate 409, empty-password 400, toggle off/on,
+  reset ok), confirmed the delete dialog + delete after the FK fix; cleaned up to the seed baseline
+  (only `admin`). No console errors.
+
 ## Open issues (not yet addressed)
 - **3MF thumbnail deletion** (`file_delete`) removes *all* of an order's plate thumbnails, not just the
   deleted 3MF's — mirrors a pre-existing Jinja bug. Proper fix needs an `OrderFile.parent_file_id` column +
@@ -157,7 +178,8 @@ Ported the business-analytics page (`stats.html` + its Chart.js scripts).
   `docker compose down -v` then up.
 
 ## Current state / next step
-Login, Dashboard, Filaments, all of Orders (list/detail/form), Settings, both Quote pages
-(single + combined), and **Statistics** (Recharts) are migrated and verified.
-**Remaining page:** admin/users.
-Then: build the SPA into Flask static and update Dockerfile/compose for prod (serve same-origin).
+**All pages migrated and verified:** Login, Dashboard, Filaments, Orders (list/detail/form),
+Settings, both Quote pages, Statistics, and Admin/users. The SPA is at feature parity with the Jinja
+app; every route is real (no `ComingSoon` left).
+**Remaining work (not a page):** build the SPA into Flask static + update Dockerfile/compose for prod
+(single container, same-origin). Until then the Jinja app stays the shippable one on `main`.

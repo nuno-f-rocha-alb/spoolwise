@@ -4,7 +4,6 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom"
 import { AppLayout } from "@/components/AppLayout"
 import { ProtectedRoute } from "@/components/ProtectedRoute"
 import { ThemeProvider } from "@/hooks/useTheme"
-import ComingSoon from "@/pages/ComingSoon"
 import Dashboard from "@/pages/Dashboard"
 import Filaments from "@/pages/Filaments"
 import FilamentForm from "@/pages/FilamentForm"
@@ -17,6 +16,7 @@ import Quote from "@/pages/Quote"
 import QuoteCombined from "@/pages/QuoteCombined"
 import Settings from "@/pages/Settings"
 import Statistics from "@/pages/Statistics"
+import Users from "@/pages/Users"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -49,10 +49,7 @@ export default function App() {
                 <Route path="/orders/:id/edit" element={<OrderForm />} />
                 <Route path="/stats" element={<Statistics />} />
                 <Route path="/settings" element={<Settings />} />
-                <Route
-                  path="/admin/users"
-                  element={<ComingSoon title="Manage users" />}
-                />
+                <Route path="/admin/users" element={<Users />} />
               </Route>
               {/* Standalone, print-friendly — outside the app shell (no nav). */}
               <Route path="/quote/combined" element={<QuoteCombined />} />

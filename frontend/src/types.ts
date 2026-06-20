@@ -259,6 +259,23 @@ export interface StatsResponse {
   stock: StatsStockItem[]
 }
 
+export interface AdminUser {
+  id: number
+  username: string
+  display_name: string | null
+  email: string | null
+  is_admin: boolean
+  is_active: boolean
+  initials: string
+  created_at: string | null
+  last_login_at: string | null
+}
+
+export interface AdminUsersResponse {
+  trust_proxy_auth: boolean
+  users: AdminUser[]
+}
+
 export interface AppSettings {
   electricity_price_per_kwh: number
   printer_power_watts: number
