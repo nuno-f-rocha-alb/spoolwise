@@ -195,6 +195,70 @@ export interface CombinedQuoteResponse {
   vat_rates: number[]
 }
 
+export interface StatsMonthlyRow {
+  key: string
+  label: string
+  orders: number
+  revenue: number
+  cost: number
+  vat: number
+  profit: number
+}
+
+export interface StatsTopFilament {
+  name: string
+  material: string
+  color: string
+  weight_g: number
+  cost: number
+}
+
+export interface StatsStockItem {
+  id: number
+  name: string
+  material: string
+  color: string
+  color_hex: string | null
+  stock_kg: number
+  stock_value: number
+}
+
+export interface StatsResponse {
+  currency: string
+  retail_mode_enabled: boolean
+  totals: {
+    revenue: number
+    filament_cost_commercial: number
+    electricity_cost_commercial: number
+    total_cost_commercial: number
+    profit: number
+    vat_collected: number
+    revenue_retail: number
+    revenue_particular: number
+    delivered_retail_count: number
+    filament_cost_internal: number
+    electricity_cost_internal: number
+    print_hours_all: number
+    print_hours_commercial: number
+    print_hours_internal: number
+    filament_purchased_spend: number
+    stock_value: number
+    stock_kg: number
+    filament_count: number
+  }
+  counts: {
+    total: number
+    commercial: number
+    internal: number
+    pending: number
+    printed: number
+    delivered: number
+  }
+  monthly: StatsMonthlyRow[]
+  top_filaments: StatsTopFilament[]
+  stock: StatsStockItem[]
+}
+
 export interface AppSettings {
   electricity_price_per_kwh: number
   printer_power_watts: number

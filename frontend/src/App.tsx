@@ -16,6 +16,7 @@ import OrderForm from "@/pages/OrderForm"
 import Quote from "@/pages/Quote"
 import QuoteCombined from "@/pages/QuoteCombined"
 import Settings from "@/pages/Settings"
+import Statistics from "@/pages/Statistics"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -46,7 +47,7 @@ export default function App() {
                 <Route path="/orders/new" element={<OrderForm />} />
                 <Route path="/orders/:id" element={<OrderDetail />} />
                 <Route path="/orders/:id/edit" element={<OrderForm />} />
-                <Route path="/stats" element={<ComingSoon title="Statistics" />} />
+                <Route path="/stats" element={<Statistics />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route
                   path="/admin/users"

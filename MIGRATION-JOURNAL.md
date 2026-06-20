@@ -119,6 +119,26 @@ Ported the two customer-facing print views (`quote.html` / `quote_combined.html`
   enabling retail + tagging order 1, screenshotting, then **reverting to the seed baseline**
   (order 1 sell back to 1.299415, retail off).
 
+### §12 — Statistics (Recharts)
+Ported the business-analytics page (`stats.html` + its Chart.js scripts).
+- **Backend:** added `GET /api/stats` — a faithful port of the `stats` route's aggregation. Same
+  rule: only **delivered commercial** orders feed revenue/profit; personal-use orders are tracked as
+  real cost; monthly buckets keyed by `delivered_at` (last 24). Returns `totals`, `counts`,
+  `monthly[]`, `top_filaments[]` (top 10 by cost), and in-stock `stock[]` (value-desc). Charts derive
+  their inputs from `monthly`/`stock` client-side, so no separate `chart_*` payloads (vs. the Jinja
+  route which pre-baked `chart_monthly`/`chart_stock` for Chart.js). Renamed the Jinja leftover
+  `(removido)` → `(removed)` to match the SPA's existing convention.
+- **Frontend:** `Statistics.tsx` with **Recharts** (`ComposedChart`: revenue/cost bars + profit line;
+  horizontal `BarChart` with per-filament `Cell` colors for stock value). Recharts reads the design
+  tokens directly (`fill="var(--success)"` etc.) so the charts **auto-adapt to dark mode** — no
+  theme-watching JS like the Jinja Chart.js block needed. KPI cards, retail/VAT row (conditional on
+  retail mode), print-time/personal/inventory panels, monthly + top-filament + inventory tables,
+  order-status panel. `maxBarSize={64}` so a single-month bucket doesn't stretch into slabs.
+- **Verified live (light + dark):** marked orders 1+2 delivered to populate revenue (8,08 €), profit
+  (+1,87 €, margin 23.1%), the monthly chart, and top-filaments; enabled retail to confirm the VAT
+  KPI row renders; the stock chart shows real per-filament colors. Then **reverted to the seed
+  baseline** (retail off, all 3 orders back to pending, 0 delivered). No console warnings.
+
 ## Open issues (not yet addressed)
 - **3MF thumbnail deletion** (`file_delete`) removes *all* of an order's plate thumbnails, not just the
   deleted 3MF's — mirrors a pre-existing Jinja bug. Proper fix needs an `OrderFile.parent_file_id` column +
@@ -137,7 +157,7 @@ Ported the two customer-facing print views (`quote.html` / `quote_combined.html`
   `docker compose down -v` then up.
 
 ## Current state / next step
-Login, Dashboard, Filaments, all of Orders (list/detail/form), Settings, and **both Quote pages**
-(single + combined) are migrated and verified.
-**Remaining pages:** statistics (Recharts) · admin/users.
+Login, Dashboard, Filaments, all of Orders (list/detail/form), Settings, both Quote pages
+(single + combined), and **Statistics** (Recharts) are migrated and verified.
+**Remaining page:** admin/users.
 Then: build the SPA into Flask static and update Dockerfile/compose for prod (serve same-origin).

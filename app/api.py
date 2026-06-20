@@ -1072,3 +1072,175 @@ def order_update(oid):
             "stock_warnings": stock_warnings if not skip else [],
         }
     )
+
+
+# ---------- Statistics ----------
+
+@api_bp.get("/stats")
+@login_required
+def stats():
+    """Business analytics for the SPA (faithful port of the Jinja `stats` route).
+    Only *delivered commercial* orders count toward revenue/profit; personal-use
+    orders are tracked as real cost only. Aggregation is server-side; the charts
+    derive their inputs from `monthly` and `stock` client-side."""
+    import calendar
+    from collections import defaultdict
+
+    retail_on = Setting.get_bool("retail_mode_enabled")
+
+    all_orders = (
+        PrintOrder.query.filter_by(user_id=current_user.id)
+        .order_by(PrintOrder.created_at)
+        .all()
+    )
+    commercial = [o for o in all_orders if not o.is_internal]
+    internal = [o for o in all_orders if o.is_internal]
+    delivered = [o for o in commercial if o.delivered_at]
+
+    revenue = sum((o.sell_price for o in delivered), Decimal(0))
+    filament_cost_c = sum((o.filament_cost for o in delivered), Decimal(0))
+    electricity_cost_c = sum((o.electricity_cost for o in delivered), Decimal(0))
+    total_cost_c = filament_cost_c + electricity_cost_c
+    profit = revenue - total_cost_c
+
+    delivered_retail = [o for o in delivered if o.has_vat]
+    revenue_retail = sum((o.sell_price for o in delivered_retail), Decimal(0))
+    revenue_particular = sum(
+        (o.sell_price for o in delivered if not o.has_vat), Decimal(0)
+    )
+    vat_collected = sum((o.vat_amount for o in delivered_retail), Decimal(0))
+
+    filament_cost_i = sum((o.filament_cost for o in internal), Decimal(0))
+    electricity_cost_i = sum((o.electricity_cost for o in internal), Decimal(0))
+
+    print_hours_all = sum((o.total_print_time_hours for o in all_orders), Decimal(0))
+    print_hours_c = sum((o.total_print_time_hours for o in commercial), Decimal(0))
+    print_hours_i = sum((o.total_print_time_hours for o in internal), Decimal(0))
+
+    purchases = FilamentPurchase.query.filter_by(user_id=current_user.id).all()
+    purchased_spend = sum(
+        (
+            (Decimal(str(p.quantity_g)) / Decimal(1000)) * Decimal(str(p.price_per_kg))
+            for p in purchases
+        ),
+        Decimal(0),
+    )
+
+    filaments = (
+        Filament.query.filter_by(user_id=current_user.id).order_by(Filament.name).all()
+    )
+    stock_value = sum((f.stock_value for f in filaments), Decimal(0))
+    stock_kg = sum((f.stock_kg for f in filaments), Decimal(0))
+
+    # Monthly breakdown (delivered commercial), at most the last 24 months.
+    monthly = defaultdict(
+        lambda: {"revenue": Decimal(0), "cost": Decimal(0), "vat": Decimal(0), "orders": 0}
+    )
+    for o in delivered:
+        key = o.delivered_at.strftime("%Y-%m")
+        monthly[key]["revenue"] += o.sell_price
+        monthly[key]["cost"] += o.total_cost
+        monthly[key]["vat"] += o.vat_amount
+        monthly[key]["orders"] += 1
+
+    monthly_rows = []
+    for key in sorted(monthly.keys())[-24:]:
+        year, month = map(int, key.split("-"))
+        m = monthly[key]
+        monthly_rows.append(
+            {
+                "key": key,
+                "label": f"{calendar.month_abbr[month]}/{year}",
+                "orders": m["orders"],
+                "revenue": float(m["revenue"]),
+                "cost": float(m["cost"]),
+                "vat": float(m["vat"]),
+                "profit": float(m["revenue"] - m["cost"]),
+            }
+        )
+
+    # Top filaments by cost in delivered commercial orders.
+    spend = defaultdict(
+        lambda: {
+            "name": "",
+            "material": "",
+            "color": "",
+            "weight_g": Decimal(0),
+            "cost": Decimal(0),
+        }
+    )
+    for o in delivered:
+        for plate in o.plates:
+            for it in plate.items:
+                row = spend[it.filament_id]
+                if it.filament:
+                    row["name"] = it.filament.name
+                    row["material"] = it.filament.material
+                    row["color"] = it.filament.color
+                else:
+                    row["name"] = "(removed)"
+                row["weight_g"] += Decimal(str(it.weight_g))
+                row["cost"] += it.cost
+    top_filaments = [
+        {
+            "name": r["name"],
+            "material": r["material"],
+            "color": r["color"],
+            "weight_g": float(r["weight_g"]),
+            "cost": float(r["cost"]),
+        }
+        for r in sorted(spend.values(), key=lambda x: x["cost"], reverse=True)[:10]
+    ]
+
+    # In-stock filaments (stock > 0), largest value first — used by table + chart.
+    stock = [
+        {
+            "id": f.id,
+            "name": f.name,
+            "material": f.material,
+            "color": f.color,
+            "color_hex": f.color_hex,
+            "stock_kg": float(f.stock_kg),
+            "stock_value": float(f.stock_value),
+        }
+        for f in sorted(filaments, key=lambda f: f.stock_value, reverse=True)
+        if f.stock_g > 0
+    ]
+
+    return jsonify(
+        {
+            "currency": Setting.get("currency_symbol", cast=str) or "€",
+            "retail_mode_enabled": retail_on,
+            "totals": {
+                "revenue": float(revenue),
+                "filament_cost_commercial": float(filament_cost_c),
+                "electricity_cost_commercial": float(electricity_cost_c),
+                "total_cost_commercial": float(total_cost_c),
+                "profit": float(profit),
+                "vat_collected": float(vat_collected),
+                "revenue_retail": float(revenue_retail),
+                "revenue_particular": float(revenue_particular),
+                "delivered_retail_count": len(delivered_retail),
+                "filament_cost_internal": float(filament_cost_i),
+                "electricity_cost_internal": float(electricity_cost_i),
+                "print_hours_all": float(print_hours_all),
+                "print_hours_commercial": float(print_hours_c),
+                "print_hours_internal": float(print_hours_i),
+                "filament_purchased_spend": float(purchased_spend),
+                "stock_value": float(stock_value),
+                "stock_kg": float(stock_kg),
+                "filament_count": len(filaments),
+            },
+            "counts": {
+                "total": len(all_orders),
+                "commercial": len(commercial),
+                "internal": len(internal),
+                "pending": sum(1 for o in all_orders if o.status == "pending"),
+                "printed": sum(1 for o in all_orders if o.status == "printed"),
+                "delivered": sum(1 for o in all_orders if o.status == "delivered"),
+            },
+            "monthly": monthly_rows,
+            "top_filaments": top_filaments,
+            "stock": stock,
+        }
+    )
