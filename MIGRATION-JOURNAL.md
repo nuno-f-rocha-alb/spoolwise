@@ -189,6 +189,23 @@ Wired the built SPA into the container and flipped the UI from Jinja to React.
   api 404, anon protected 401); browser login through the Flask-served build → dashboard with live data
   (same-origin, no proxy); the multi-stage image builds and contains `app/spa`.
 
+### §15 — Promotion to `main` + image published
+Cutover shipped.
+- **Backup:** old Jinja `main` (`e4e98bd`) preserved as branch `backup/jinja-main` (pushed to origin)
+  before touching `main`.
+- **Promotion:** `main` had not diverged, so `feature/react-spa-migration` → `main` was a clean
+  **fast-forward** (no history rewrite). `main` now at `bf18786`. Feature branch also pushed.
+- **CI:** the push to `main` triggered `docker.yml`; the multi-stage build succeeded (~48s) and pushed
+  `nunobifes/spoolwise:latest`. User recreates the container in Portainer.
+- **Deploy safety:** no schema change → existing DB volume untouched; `docker-compose.yml` unchanged;
+  hybrid-auth env vars already wired. First boot runs the additive migrations (idempotent).
+- **Rollback caveat (root cause):** CI tags only `:latest`, so this push **overwrote** the previous
+  Jinja image at that tag — rollback means redeploying from `backup/jinja-main` (re-run CI or build
+  locally). Adding SHA/version tags to the workflow would make rollbacks cleaner (deferred — would
+  need a workflow change + the user's call on a tagging scheme).
+- Minor CI annotation: the GitHub Actions (`checkout@v4`, `build-push-action@v5`, `login-action@v3`)
+  are on the Node-20 deprecation list — a version bump someday, non-blocking.
+
 ## Open issues (not yet addressed)
 - **3MF thumbnail deletion** (`file_delete`) removes *all* of an order's plate thumbnails, not just the
   deleted 3MF's — mirrors a pre-existing Jinja bug. Proper fix needs an `OrderFile.parent_file_id` column +
@@ -210,7 +227,9 @@ Wired the built SPA into the container and flipped the UI from Jinja to React.
 **All pages migrated and verified:** Login, Dashboard, Filaments, Orders (list/detail/form),
 Settings, both Quote pages, Statistics, and Admin/users. The SPA is at feature parity with the Jinja
 app; every route is real (no `ComingSoon` left).
-**Migration complete.** All pages migrated AND the production build is wired (§14): the multi-stage image
-builds the SPA and Flask serves it same-origin; Jinja is retired. Verified end-to-end on `:5000` + as a
-built Docker image. Ready to promote `feature/react-spa-migration` → `main` (after backing up the Jinja
-`main` to a branch) so CI publishes the new image.
+**Migration complete and shipped (§15).** All pages migrated, the production build is wired (§14), and
+`main` is now the SPA version (`bf18786`) with `nunobifes/spoolwise:latest` rebuilt and pushed by CI.
+The old Jinja app is preserved on `backup/jinja-main`. Awaiting the Portainer container recreate.
+Possible follow-ups (all deferred, non-blocking): SHA/version image tags for cleaner rollback; scrub the
+now-dead Jinja route code + templates; bump the Node-20 GitHub Actions; the two long-standing open issues
+below.
