@@ -3,6 +3,7 @@ import { Check } from "lucide-react"
 import { Link, useNavigate } from "react-router-dom"
 
 import { ColorPicker } from "@/components/ColorPicker"
+import { FilamentSwatch } from "@/components/FilamentSwatch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
@@ -211,9 +212,12 @@ export default function FilamentForm() {
                       <SelectValue placeholder="— select —" />
                     </SelectTrigger>
                     <SelectContent>
-                      {colorEntries.map(([name]) => (
+                      {colorEntries.map(([name, hexValue]) => (
                         <SelectItem key={name} value={name}>
-                          {name}
+                          <span className="flex items-center gap-2">
+                            <FilamentSwatch hex={hexValue} />
+                            {name}
+                          </span>
                         </SelectItem>
                       ))}
                       <SelectItem value={OTHER}>Other…</SelectItem>
