@@ -96,6 +96,29 @@ multi-copy orders. Verified live: swatches render in the cascade; Duplicate prod
 Adopted the **ponytail** minimalism ladder as the default coding lens from here on (write only what the task
 needs; reuse stdlib/native/installed/one-liners; never cut validation/security/a11y).
 
+### §11 — Quote pages: single + combined
+Ported the two customer-facing print views (`quote.html` / `quote_combined.html`).
+- **Backend:** the single quote needs **no new endpoint** — `serialize_order_detail` already
+  carries every field it shows (name/customer/links/plates/qty/VAT/prices), so `/quote/:id` reuses
+  `GET /api/orders/:id`. Added one endpoint `GET /api/quote/combined?ids=` (faithful port of
+  `order_quote_combined`): user-scoped, `created_at asc`, 404 on no match, 400 on empty ids;
+  aggregates `subtotal/vat_total/total/has_any_vat/vat_rates` over **billable (non-internal)** orders
+  only. New `serialize_quote_item` (money fields only — the customer view never sees cost/profit).
+- **Frontend:** `Quote.tsx` (reuses `useOrderDetail`) + `QuoteCombined.tsx` (`useCombinedQuote`).
+  Shared `QuoteFrame` (standalone print-friendly wrapper: eyebrow/meta header, `window.print()` +
+  back link hidden via `print:hidden`, logo footer) and `PriceBox` (brand blue→indigo gradient).
+  Added `formatDate` (`%d %b %Y` parity) and quote types.
+- **Routing decision (deliberate):** mounted both quote routes as **direct children of
+  `ProtectedRoute`, OUTSIDE `AppLayout`** — these are standalone customer documents, so no app nav
+  shell. `/quote/combined` is registered **before** `/quote/:id` so "combined" isn't captured as the
+  `:id` param.
+- **Verified live (light + dark):** single quote no-VAT (1,30 €) and VAT branch (line-item table +
+  Subtotal/VAT 23%/Total 1,60 €); combined excludes the personal-use order ("1 personal-use order
+  excluded", total 8,08 €) and aggregates VAT (8,38 €) with the per-item VAT tag. No console errors.
+  Seeded orders carry no VAT (retail mode off), so the VAT branches were exercised by temporarily
+  enabling retail + tagging order 1, screenshotting, then **reverting to the seed baseline**
+  (order 1 sell back to 1.299415, retail off).
+
 ## Open issues (not yet addressed)
 - **3MF thumbnail deletion** (`file_delete`) removes *all* of an order's plate thumbnails, not just the
   deleted 3MF's — mirrors a pre-existing Jinja bug. Proper fix needs an `OrderFile.parent_file_id` column +
@@ -114,6 +137,7 @@ needs; reuse stdlib/native/installed/one-liners; never cut validation/security/a
   `docker compose down -v` then up.
 
 ## Current state / next step
-Login, Dashboard, Filaments, all of Orders (list/detail/form), and Settings are migrated and verified.
-**Remaining pages:** quote + combined quote · statistics (Recharts) · admin/users.
+Login, Dashboard, Filaments, all of Orders (list/detail/form), Settings, and **both Quote pages**
+(single + combined) are migrated and verified.
+**Remaining pages:** statistics (Recharts) · admin/users.
 Then: build the SPA into Flask static and update Dockerfile/compose for prod (serve same-origin).

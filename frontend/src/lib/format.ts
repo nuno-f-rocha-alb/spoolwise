@@ -35,6 +35,18 @@ export function formatDateTime(iso: string | null): string {
   })
 }
 
+// Short calendar date ("20 Jun 2026"), matching the Jinja quote `%d %b %Y`.
+export function formatDate(iso: string | null): string {
+  if (!iso) return "—"
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return "—"
+  return d.toLocaleDateString(undefined, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  })
+}
+
 // Render `print_time_hours` (decimal hours) as "Hh MMm", matching the Jinja
 // `duration` filter.
 export function duration(hours: number): string {

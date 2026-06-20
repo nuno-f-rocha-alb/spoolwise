@@ -885,6 +885,76 @@ def order_create():
     )
 
 
+# ---------- Combined quote ----------
+
+def serialize_quote_item(o: PrintOrder) -> dict:
+    """Per-order line for the combined quote (money fields only — the customer
+    view never needs cost/profit internals)."""
+    return {
+        "id": o.id,
+        "name": o.name,
+        "customer": o.customer,
+        "created_at": o.created_at.isoformat() if o.created_at else None,
+        "is_internal": o.is_internal,
+        "has_vat": o.has_vat,
+        "vat_rate_pct": float(o.vat_rate_pct) if o.vat_rate_pct is not None else None,
+        "quantity": o.qty,
+        "unit_sell_price": float(o.unit_sell_price),
+        "sell_price": float(o.sell_price),
+        "vat_amount": float(o.vat_amount),
+        "sell_price_with_vat": float(o.sell_price_with_vat),
+    }
+
+
+@api_bp.get("/quote/combined")
+@login_required
+def quote_combined():
+    """Aggregated quote for several orders (mirrors the Jinja order_quote_combined).
+    Personal-use (internal) orders are excluded from the money totals."""
+    raw_ids = request.args.get("ids", "")
+    try:
+        ids = [int(x) for x in raw_ids.split(",") if x.strip()]
+    except ValueError:
+        ids = []
+    if not ids:
+        return jsonify({"error": "Select at least one order to combine."}), 400
+
+    orders = (
+        PrintOrder.query.filter(
+            PrintOrder.user_id == current_user.id, PrintOrder.id.in_(ids)
+        )
+        .order_by(PrintOrder.created_at.asc())
+        .all()
+    )
+    if not orders:
+        abort(404)
+
+    billable = [o for o in orders if not o.is_internal]
+    subtotal = sum((o.sell_price for o in billable), Decimal(0))
+    vat_total = sum((o.vat_amount for o in billable), Decimal(0))
+    total = subtotal + vat_total
+    has_any_vat = any(o.has_vat for o in billable)
+    vat_rates = sorted(
+        {
+            float(o.vat_rate_pct)
+            for o in billable
+            if o.has_vat and o.vat_rate_pct is not None
+        }
+    )
+
+    return jsonify(
+        {
+            "currency": Setting.get("currency_symbol", cast=str) or "€",
+            "orders": [serialize_quote_item(o) for o in orders],
+            "subtotal": float(subtotal),
+            "vat_total": float(vat_total),
+            "total": float(total),
+            "has_any_vat": has_any_vat,
+            "vat_rates": vat_rates,
+        }
+    )
+
+
 @api_bp.put("/orders/<int:oid>")
 @login_required
 def order_update(oid):

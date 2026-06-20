@@ -13,6 +13,8 @@ import Login from "@/pages/Login"
 import Orders from "@/pages/Orders"
 import OrderDetail from "@/pages/OrderDetail"
 import OrderForm from "@/pages/OrderForm"
+import Quote from "@/pages/Quote"
+import QuoteCombined from "@/pages/QuoteCombined"
 import Settings from "@/pages/Settings"
 
 const queryClient = new QueryClient({
@@ -44,14 +46,6 @@ export default function App() {
                 <Route path="/orders/new" element={<OrderForm />} />
                 <Route path="/orders/:id" element={<OrderDetail />} />
                 <Route path="/orders/:id/edit" element={<OrderForm />} />
-                <Route
-                  path="/quote/:id"
-                  element={<ComingSoon title="Quote" />}
-                />
-                <Route
-                  path="/quote/combined"
-                  element={<ComingSoon title="Combined quote" />}
-                />
                 <Route path="/stats" element={<ComingSoon title="Statistics" />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route
@@ -59,6 +53,9 @@ export default function App() {
                   element={<ComingSoon title="Manage users" />}
                 />
               </Route>
+              {/* Standalone, print-friendly — outside the app shell (no nav). */}
+              <Route path="/quote/combined" element={<QuoteCombined />} />
+              <Route path="/quote/:id" element={<Quote />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

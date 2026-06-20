@@ -170,6 +170,31 @@ export interface OrderDetailResponse {
   order: OrderDetail
 }
 
+export interface QuoteItem {
+  id: number
+  name: string
+  customer: string | null
+  created_at: string | null
+  is_internal: boolean
+  has_vat: boolean
+  vat_rate_pct: number | null
+  quantity: number
+  unit_sell_price: number
+  sell_price: number
+  vat_amount: number
+  sell_price_with_vat: number
+}
+
+export interface CombinedQuoteResponse {
+  currency: string
+  orders: QuoteItem[]
+  subtotal: number
+  vat_total: number
+  total: number
+  has_any_vat: boolean
+  vat_rates: number[]
+}
+
 export interface AppSettings {
   electricity_price_per_kwh: number
   printer_power_watts: number
