@@ -22,6 +22,22 @@ export function useSettings() {
   })
 }
 
+export function useUpdateSettings() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: AppSettings) =>
+      api.put<AppSettings>("/api/settings", payload),
+    onSuccess: (data) => {
+      qc.setQueryData(["settings"], data)
+      // currency + retail mode are shown app-wide and bootstrap from /me
+      qc.invalidateQueries({ queryKey: ["auth", "me"] })
+      qc.invalidateQueries({ queryKey: ["dashboard"] })
+      qc.invalidateQueries({ queryKey: ["orders"] })
+      qc.invalidateQueries({ queryKey: ["filaments"] })
+    },
+  })
+}
+
 function invalidateOrderData(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["orders"] })
   qc.invalidateQueries({ queryKey: ["dashboard"] })

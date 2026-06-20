@@ -13,6 +13,7 @@ import Login from "@/pages/Login"
 import Orders from "@/pages/Orders"
 import OrderDetail from "@/pages/OrderDetail"
 import OrderForm from "@/pages/OrderForm"
+import Settings from "@/pages/Settings"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -52,10 +53,7 @@ export default function App() {
                   element={<ComingSoon title="Combined quote" />}
                 />
                 <Route path="/stats" element={<ComingSoon title="Statistics" />} />
-                <Route
-                  path="/settings"
-                  element={<ComingSoon title="Settings" />}
-                />
+                <Route path="/settings" element={<Settings />} />
                 <Route
                   path="/admin/users"
                   element={<ComingSoon title="Manage users" />}

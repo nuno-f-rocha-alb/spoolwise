@@ -193,6 +193,27 @@ def settings_get():
     )
 
 
+@api_bp.put("/settings")
+@login_required
+def settings_update():
+    data = request.get_json(silent=True) or {}
+    Setting.set("electricity_price_per_kwh", _dec(data.get("electricity_price_per_kwh")))
+    Setting.set("printer_power_watts", _dec(data.get("printer_power_watts")))
+    Setting.set("default_profit_pct", _dec(data.get("default_profit_pct")))
+    currency = (data.get("currency_symbol") or "€").strip() or "€"
+    Setting.set("currency_symbol", currency)
+    Setting.set(
+        "retail_mode_enabled",
+        "true" if data.get("retail_mode_enabled") else "false",
+    )
+    Setting.set(
+        "default_vat_rate_pct",
+        _dec(data.get("default_vat_rate_pct"), default=Decimal("23")),
+    )
+    db.session.commit()
+    return settings_get()
+
+
 @api_bp.get("/dashboard")
 @login_required
 def dashboard():

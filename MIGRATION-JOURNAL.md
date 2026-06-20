@@ -79,6 +79,15 @@ reset handlers then chain-clear via stale closures. **Fix:** gate the form body 
 AND prefill is applied (`prefillDone`), so each Select mounts exactly once with a valid value whose option
 already exists. Apply this pattern to any prefilled form with dependent selects.
 
+### §9 — Settings page
+`GET /api/settings` (added in §8) + `PUT /api/settings` (ports the Jinja settings POST). Settings page:
+electricity/printer, business defaults (profit %, currency), retail mode + default VAT. `useUpdateSettings`
+invalidates `["settings"]`, `["auth","me"]`, dashboard/orders/filaments (currency + retail mode are shown
+app-wide). Verified live: load → prefill → edit → save → persist, light + dark.
+**Note:** a manual `curl` reset with a `€` in the JSON body mis-encoded earlier numeric fields in the shell
+(set electricity/watts to 0) — a *test-harness* issue, not a code bug; the UI save path is correct. Lesson:
+reset seed state via the UI or a file-based `--data @`, not inline shell JSON containing non-ASCII.
+
 ## Open issues (not yet addressed)
 - **3MF thumbnail deletion** (`file_delete`) removes *all* of an order's plate thumbnails, not just the
   deleted 3MF's — mirrors a pre-existing Jinja bug. Proper fix needs an `OrderFile.parent_file_id` column +
@@ -97,8 +106,6 @@ already exists. Apply this pattern to any prefilled form with dependent selects.
   `docker compose down -v` then up.
 
 ## Current state / next step
-Login, Dashboard, Filaments, and all of Orders (list/detail/form) are migrated and verified.
-**In progress:** Settings — `GET /api/settings` done; `PUT /api/settings` + `useUpdateSettings` added
-(uncommitted); the Settings page + verification remain.
-**Remaining pages:** Settings · quote + combined quote · statistics (Recharts) · admin/users.
+Login, Dashboard, Filaments, all of Orders (list/detail/form), and Settings are migrated and verified.
+**Remaining pages:** quote + combined quote · statistics (Recharts) · admin/users.
 Then: build the SPA into Flask static and update Dockerfile/compose for prod (serve same-origin).
