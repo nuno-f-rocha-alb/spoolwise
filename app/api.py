@@ -28,14 +28,19 @@ from .models import (
     Filament,
     FilamentPurchase,
     OrderFile,
+    OrderLink,
+    PlateFilament,
     PrintOrder,
+    PrintPlate,
     Setting,
     User,
     db,
 )
 from .routes import (
     _ALLOWED_UPLOAD_EXTS,
+    _fetch_og,
     _parse_bambu_3mf,
+    _snapshot_price_factory,
     _sync_order_printed,
     _user_file_or_404,
     _user_plate_or_404,
@@ -167,6 +172,25 @@ def serialize_order_summary(o: PrintOrder) -> dict:
         "total_cost": float(o.total_cost),
         "sell_price": float(o.sell_price),
     }
+
+
+@api_bp.get("/settings")
+@login_required
+def settings_get():
+    return jsonify(
+        {
+            "electricity_price_per_kwh": float(
+                Setting.get("electricity_price_per_kwh") or 0
+            ),
+            "printer_power_watts": float(Setting.get("printer_power_watts") or 0),
+            "default_profit_pct": float(Setting.get("default_profit_pct") or 30),
+            "currency_symbol": Setting.get("currency_symbol", cast=str) or "€",
+            "retail_mode_enabled": Setting.get_bool("retail_mode_enabled"),
+            "default_vat_rate_pct": float(
+                Setting.get("default_vat_rate_pct") or Decimal("23")
+            ),
+        }
+    )
 
 
 @api_bp.get("/dashboard")
@@ -681,3 +705,279 @@ def file_delete(fid):
 
     db.session.commit()
     return jsonify({"ok": True})
+
+
+# ---------- Order create / update ----------
+
+def _parse_plates_payload(plates_raw):
+    """Validate the plates array. Returns (plates_data, error).
+
+    plates_data: list of (print_time_hours, name|None, [(filament_id, weight_g)])."""
+    if not isinstance(plates_raw, list) or not plates_raw:
+        return None, "Add at least one plate."
+    plates_data = []
+    for i, p in enumerate(plates_raw):
+        p = p or {}
+        pt = _dec(p.get("print_time_hours"))
+        pname = (p.get("name") or "").strip() or None
+        if pt <= 0:
+            return None, f"Plate {i + 1}: print time must be positive."
+        items = []
+        for it in p.get("filaments") or []:
+            fid = (it or {}).get("filament_id")
+            w = _dec((it or {}).get("weight_g"))
+            if not fid or w <= 0:
+                continue
+            try:
+                items.append((int(fid), w))
+            except (ValueError, TypeError):
+                continue  # skip malformed filament_id
+        if not items:
+            return None, f"Plate {i + 1}: add at least one filament with weight > 0."
+        plates_data.append((pt, pname, items))
+    if not plates_data:
+        return None, "Add at least one plate."
+    return plates_data, None
+
+
+def _order_form_fields(data):
+    """Common scalar fields shared by create + update."""
+    retail_on = Setting.get_bool("retail_mode_enabled")
+    is_internal = bool(data.get("is_internal"))
+    has_vat = retail_on and not is_internal and bool(data.get("has_vat"))
+    vat_rate_pct = None
+    if has_vat:
+        vat_rate_pct = _dec(
+            data.get("vat_rate_pct"),
+            default=Setting.get("default_vat_rate_pct") or Decimal("23"),
+        )
+    try:
+        quantity = max(1, int(data.get("quantity") or 1))
+    except (ValueError, TypeError):
+        quantity = 1
+    return {
+        "name": (data.get("name") or "").strip(),
+        "customer": (data.get("customer") or "").strip() or None,
+        "notes": (data.get("notes") or "").strip() or None,
+        "raw_urls": [u.strip() for u in (data.get("model_urls") or []) if u and u.strip()],
+        "is_internal": is_internal,
+        "skip_stock_check": bool(data.get("skip_stock_check")),
+        "profit_pct": _dec(
+            data.get("profit_pct"),
+            default=Setting.get("default_profit_pct") or Decimal(30),
+        ),
+        "quantity": quantity,
+        "has_vat": has_vat,
+        "vat_rate_pct": vat_rate_pct,
+    }
+
+
+@api_bp.post("/orders")
+@login_required
+def order_create():
+    data = request.get_json(silent=True) or {}
+    fields = _order_form_fields(data)
+    if not fields["name"]:
+        return jsonify({"error": "Name is required."}), 400
+
+    plates_data, err = _parse_plates_payload(data.get("plates"))
+    if err:
+        return jsonify({"error": err}), 400
+
+    skip = fields["skip_stock_check"]
+    qty_dec = Decimal(fields["quantity"])
+
+    filament_usage: dict = {}
+    for _pt, _pn, items in plates_data:
+        for fid, w in items:
+            filament_usage[fid] = filament_usage.get(fid, Decimal(0)) + w * qty_dec
+
+    filament_objs: dict = {}
+    stock_warnings: list = []
+    for fid, total_w in filament_usage.items():
+        f = Filament.query.filter_by(id=fid, user_id=current_user.id).first()
+        if f is None:
+            return jsonify({"error": "Invalid filament."}), 400
+        if not skip and Decimal(str(f.stock_g or 0)) < total_w:
+            short = total_w - Decimal(str(f.stock_g or 0))
+            stock_warnings.append(
+                f"{f.name} {f.material} {f.color}: requested {total_w} g, "
+                f"in stock {f.stock_g} g (short by {short} g)"
+            )
+        filament_objs[fid] = f
+
+    order = PrintOrder(
+        user_id=current_user.id,
+        name=fields["name"],
+        customer=fields["customer"],
+        notes=fields["notes"],
+        model_url=fields["raw_urls"][0] if fields["raw_urls"] else None,
+        profit_pct=fields["profit_pct"],
+        is_internal=fields["is_internal"],
+        skip_stock_deduction=skip,
+        quantity=fields["quantity"],
+        has_vat=fields["has_vat"],
+        vat_rate_pct=fields["vat_rate_pct"],
+        electricity_price_per_kwh=Setting.get("electricity_price_per_kwh"),
+        printer_power_watts=Setting.get("printer_power_watts"),
+    )
+    db.session.add(order)
+    db.session.flush()
+
+    for pos, url in enumerate(fields["raw_urls"]):
+        title, image = _fetch_og(url)
+        db.session.add(
+            OrderLink(order_id=order.id, position=pos, url=url, title=title, image=image)
+        )
+
+    snapshot_price = _snapshot_price_factory(fields["has_vat"], current_user.id)
+    for pos, (pt, pname, items) in enumerate(plates_data, start=1):
+        plate = PrintPlate(order_id=order.id, position=pos, name=pname, print_time_hours=pt)
+        db.session.add(plate)
+        db.session.flush()
+        for fid, w in items:
+            f = filament_objs[fid]
+            db.session.add(
+                PlateFilament(
+                    plate_id=plate.id,
+                    filament_id=f.id,
+                    weight_g=w,
+                    price_per_kg_snapshot=snapshot_price(f),
+                )
+            )
+
+    if not skip:
+        for fid, total_w in filament_usage.items():
+            filament_objs[fid].stock_g = (
+                Decimal(str(filament_objs[fid].stock_g or 0)) - total_w
+            )
+
+    db.session.commit()
+    return (
+        jsonify(
+            {
+                "order": serialize_order_detail(order),
+                "stock_warnings": stock_warnings if not skip else [],
+            }
+        ),
+        201,
+    )
+
+
+@api_bp.put("/orders/<int:oid>")
+@login_required
+def order_update(oid):
+    order = _user_order_or_404(oid)
+    data = request.get_json(silent=True) or {}
+    fields = _order_form_fields(data)
+    if not fields["name"]:
+        return jsonify({"error": "Name is required."}), 400
+
+    plates_data, err = _parse_plates_payload(data.get("plates"))
+    if err:
+        return jsonify({"error": err}), 400
+
+    skip = fields["skip_stock_check"]
+    qty_dec = Decimal(fields["quantity"])
+
+    filament_usage: dict = {}
+    for _pt, _pn, items in plates_data:
+        for fid, w in items:
+            filament_usage[fid] = filament_usage.get(fid, Decimal(0)) + w * qty_dec
+
+    # How much the order currently has deducted (old quantity, active plates only).
+    old_qty = Decimal(int(order.quantity or 1))
+    originally_deducted: dict = {}
+    if not order.skip_stock_deduction:
+        for plate in order.plates:
+            if not plate.is_skipped:
+                for it in plate.items:
+                    if it.filament is not None:
+                        originally_deducted[it.filament_id] = originally_deducted.get(
+                            it.filament_id, Decimal(0)
+                        ) + Decimal(str(it.weight_g)) * old_qty
+
+    filament_objs: dict = {}
+    stock_warnings: list = []
+    for fid, total_w in filament_usage.items():
+        f = Filament.query.filter_by(id=fid, user_id=current_user.id).first()
+        if f is None:
+            return jsonify({"error": "Invalid filament."}), 400
+        effective_stock = Decimal(str(f.stock_g or 0)) + originally_deducted.get(
+            fid, Decimal(0)
+        )
+        if not skip and effective_stock < total_w:
+            short = total_w - effective_stock
+            stock_warnings.append(
+                f"{f.name} {f.material} {f.color}: requested {total_w} g, "
+                f"available {effective_stock} g (short by {short} g)"
+            )
+        filament_objs[fid] = f
+
+    # Restore old stock.
+    for fid, deducted in originally_deducted.items():
+        f = Filament.query.filter_by(id=fid, user_id=current_user.id).first()
+        if f is not None:
+            f.stock_g = Decimal(str(f.stock_g or 0)) + deducted
+
+    old_link_map = {link.url: link for link in order.links}
+    for link in list(order.links):
+        db.session.delete(link)
+    for plate in list(order.plates):
+        db.session.delete(plate)
+    db.session.flush()
+
+    order.name = fields["name"]
+    order.customer = fields["customer"]
+    order.notes = fields["notes"]
+    order.model_url = fields["raw_urls"][0] if fields["raw_urls"] else None
+    order.profit_pct = fields["profit_pct"]
+    order.is_internal = fields["is_internal"]
+    order.skip_stock_deduction = skip
+    order.quantity = fields["quantity"]
+    order.has_vat = fields["has_vat"]
+    order.vat_rate_pct = fields["vat_rate_pct"]
+    order.electricity_price_per_kwh = Setting.get("electricity_price_per_kwh")
+    order.printer_power_watts = Setting.get("printer_power_watts")
+
+    for pos, url in enumerate(fields["raw_urls"]):
+        old = old_link_map.get(url)
+        if old is not None:
+            db.session.add(
+                OrderLink(order_id=order.id, position=pos, url=url, title=old.title, image=old.image)
+            )
+        else:
+            title, image = _fetch_og(url)
+            db.session.add(
+                OrderLink(order_id=order.id, position=pos, url=url, title=title, image=image)
+            )
+
+    snapshot_price = _snapshot_price_factory(fields["has_vat"], current_user.id)
+    for pos, (pt, pname, items) in enumerate(plates_data, start=1):
+        plate = PrintPlate(order_id=order.id, position=pos, name=pname, print_time_hours=pt)
+        db.session.add(plate)
+        db.session.flush()
+        for fid, w in items:
+            f = filament_objs[fid]
+            db.session.add(
+                PlateFilament(
+                    plate_id=plate.id,
+                    filament_id=f.id,
+                    weight_g=w,
+                    price_per_kg_snapshot=snapshot_price(f),
+                )
+            )
+
+    if not skip:
+        for fid, total_w in filament_usage.items():
+            filament_objs[fid].stock_g = (
+                Decimal(str(filament_objs[fid].stock_g or 0)) - total_w
+            )
+
+    db.session.commit()
+    return jsonify(
+        {
+            "order": serialize_order_detail(order),
+            "stock_warnings": stock_warnings if not skip else [],
+        }
+    )

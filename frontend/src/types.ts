@@ -169,3 +169,62 @@ export interface OrderDetailResponse {
   retail_mode_enabled: boolean
   order: OrderDetail
 }
+
+export interface AppSettings {
+  electricity_price_per_kwh: number
+  printer_power_watts: number
+  default_profit_pct: number
+  currency_symbol: string
+  retail_mode_enabled: boolean
+  default_vat_rate_pct: number
+}
+
+export interface OrderFormPayload {
+  name: string
+  customer?: string | null
+  notes?: string | null
+  model_urls: string[]
+  is_internal: boolean
+  skip_stock_check: boolean
+  profit_pct: number
+  quantity: number
+  has_vat: boolean
+  vat_rate_pct?: number | null
+  plates: {
+    name: string | null
+    print_time_hours: number
+    filaments: { filament_id: number; weight_g: number }[]
+  }[]
+}
+
+export interface OrderMutationResult {
+  order: OrderDetail
+  stock_warnings: string[]
+}
+
+export interface Parse3mfMatched {
+  id: number
+  brand: string
+  material: string
+  color: string
+  color_hex: string
+}
+
+export interface Parse3mfPlate {
+  index: number
+  name: string
+  print_time_hours: number
+  filaments: {
+    type: string
+    color: string
+    used_g: number
+    matched: Parse3mfMatched | null
+  }[]
+  thumb_b64: string | null
+}
+
+export interface Parse3mfResponse {
+  plates: Parse3mfPlate[]
+  thumb_b64: string | null
+  warning: string | null
+}

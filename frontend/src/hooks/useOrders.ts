@@ -1,12 +1,51 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { api } from "@/lib/api"
-import type { OrdersResponse } from "@/types"
+import type {
+  AppSettings,
+  OrderFormPayload,
+  OrderMutationResult,
+  OrdersResponse,
+} from "@/types"
 
 export function useOrders() {
   return useQuery({
     queryKey: ["orders"],
     queryFn: () => api.get<OrdersResponse>("/api/orders"),
+  })
+}
+
+export function useSettings() {
+  return useQuery({
+    queryKey: ["settings"],
+    queryFn: () => api.get<AppSettings>("/api/settings"),
+  })
+}
+
+function invalidateOrderData(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["orders"] })
+  qc.invalidateQueries({ queryKey: ["dashboard"] })
+  qc.invalidateQueries({ queryKey: ["filaments"] })
+}
+
+export function useCreateOrder() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: OrderFormPayload) =>
+      api.post<OrderMutationResult>("/api/orders", payload),
+    onSuccess: () => invalidateOrderData(qc),
+  })
+}
+
+export function useUpdateOrder(id: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: OrderFormPayload) =>
+      api.put<OrderMutationResult>(`/api/orders/${id}`, payload),
+    onSuccess: () => {
+      invalidateOrderData(qc)
+      qc.invalidateQueries({ queryKey: ["order", id] })
+    },
   })
 }
 
