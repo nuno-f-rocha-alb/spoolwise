@@ -363,6 +363,57 @@ def filament_purchase(fid):
     return jsonify({"filament": serialize_filament(f)})
 
 
+def _user_purchase_or_404(fid, pid):
+    f = _user_filament_or_404(fid)
+    p = FilamentPurchase.query.filter_by(id=pid, filament_id=f.id).first()
+    if p is None:
+        abort(404)
+    return f, p
+
+
+@api_bp.put("/filaments/<int:fid>/purchases/<int:pid>")
+@login_required
+def filament_purchase_edit(fid, pid):
+    f, p = _user_purchase_or_404(fid, pid)
+    data = request.get_json(silent=True) or {}
+    quantity_g = _dec(data.get("quantity_g"))
+    price_per_kg = _dec(data.get("price_per_kg"))
+    if quantity_g <= 0 or price_per_kg <= 0:
+        return jsonify({"error": "Quantity and price must be positive."}), 400
+    try:
+        f.edit_purchase(p, quantity_g, price_per_kg)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
+    db.session.commit()
+    purchases = (
+        FilamentPurchase.query.filter_by(filament_id=f.id)
+        .order_by(FilamentPurchase.purchased_at.desc())
+        .all()
+    )
+    return jsonify(
+        {"filament": serialize_filament(f), "purchases": [serialize_purchase(x) for x in purchases]}
+    )
+
+
+@api_bp.delete("/filaments/<int:fid>/purchases/<int:pid>")
+@login_required
+def filament_purchase_delete(fid, pid):
+    f, p = _user_purchase_or_404(fid, pid)
+    try:
+        f.delete_purchase(p)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
+    db.session.commit()
+    purchases = (
+        FilamentPurchase.query.filter_by(filament_id=f.id)
+        .order_by(FilamentPurchase.purchased_at.desc())
+        .all()
+    )
+    return jsonify(
+        {"filament": serialize_filament(f), "purchases": [serialize_purchase(x) for x in purchases]}
+    )
+
+
 @api_bp.post("/filaments/<int:fid>/adjust")
 @login_required
 def filament_adjust(fid):
@@ -479,6 +530,9 @@ def serialize_plate_item(it) -> dict:
         "filament_id": it.filament_id,
         "weight_g": float(it.weight_g),
         "price_per_kg_snapshot": float(it.price_per_kg_snapshot),
+        "price_per_kg_override": (
+            float(it.price_per_kg_override) if it.price_per_kg_override is not None else None
+        ),
         "cost": float(it.cost),
         "filament": {
             "id": f.id,
@@ -735,7 +789,7 @@ def file_delete(fid):
 def _parse_plates_payload(plates_raw):
     """Validate the plates array. Returns (plates_data, error).
 
-    plates_data: list of (print_time_hours, name|None, [(filament_id, weight_g)])."""
+    plates_data: list of (print_time_hours, name|None, [(filament_id, weight_g, override|None)])."""
     if not isinstance(plates_raw, list) or not plates_raw:
         return None, "Add at least one plate."
     plates_data = []
@@ -751,8 +805,12 @@ def _parse_plates_payload(plates_raw):
             w = _dec((it or {}).get("weight_g"))
             if not fid or w <= 0:
                 continue
+            raw_override = (it or {}).get("price_per_kg_override")
+            override = _dec(raw_override, default=None)
+            if raw_override is not None and raw_override != "" and (override is None or override <= 0):
+                return None, f"Plate {i + 1}: override price must be a positive number."
             try:
-                items.append((int(fid), w))
+                items.append((int(fid), w, override))
             except (ValueError, TypeError):
                 continue  # skip malformed filament_id
         if not items:
@@ -812,7 +870,7 @@ def order_create():
 
     filament_usage: dict = {}
     for _pt, _pn, items in plates_data:
-        for fid, w in items:
+        for fid, w, _override in items:
             filament_usage[fid] = filament_usage.get(fid, Decimal(0)) + w * qty_dec
 
     filament_objs: dict = {}
@@ -858,14 +916,15 @@ def order_create():
         plate = PrintPlate(order_id=order.id, position=pos, name=pname, print_time_hours=pt)
         db.session.add(plate)
         db.session.flush()
-        for fid, w in items:
+        for fid, w, override in items:
             f = filament_objs[fid]
             db.session.add(
                 PlateFilament(
                     plate_id=plate.id,
                     filament_id=f.id,
                     weight_g=w,
-                    price_per_kg_snapshot=snapshot_price(f),
+                    price_per_kg_snapshot=override if override else snapshot_price(f),
+                    price_per_kg_override=override,
                 )
             )
 
@@ -975,7 +1034,7 @@ def order_update(oid):
 
     filament_usage: dict = {}
     for _pt, _pn, items in plates_data:
-        for fid, w in items:
+        for fid, w, _override in items:
             filament_usage[fid] = filament_usage.get(fid, Decimal(0)) + w * qty_dec
 
     # How much the order currently has deducted (old quantity, active plates only).
@@ -1050,14 +1109,15 @@ def order_update(oid):
         plate = PrintPlate(order_id=order.id, position=pos, name=pname, print_time_hours=pt)
         db.session.add(plate)
         db.session.flush()
-        for fid, w in items:
+        for fid, w, override in items:
             f = filament_objs[fid]
             db.session.add(
                 PlateFilament(
                     plate_id=plate.id,
                     filament_id=f.id,
                     weight_g=w,
-                    price_per_kg_snapshot=snapshot_price(f),
+                    price_per_kg_snapshot=override if override else snapshot_price(f),
+                    price_per_kg_override=override,
                 )
             )
 

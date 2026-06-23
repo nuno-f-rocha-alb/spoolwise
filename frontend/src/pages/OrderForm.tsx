@@ -28,6 +28,7 @@ interface FilRow {
   material: string
   filamentId: string
   weight: string
+  priceOverride: string
 }
 interface PlateForm {
   name: string
@@ -36,7 +37,13 @@ interface PlateForm {
   filaments: FilRow[]
 }
 
-const emptyRow = (): FilRow => ({ brand: "", material: "", filamentId: "", weight: "" })
+const emptyRow = (): FilRow => ({
+  brand: "",
+  material: "",
+  filamentId: "",
+  weight: "",
+  priceOverride: "",
+})
 const emptyPlate = (): PlateForm => ({
   name: "",
   hours: "",
@@ -71,6 +78,7 @@ function FilamentRowEditor({
     (f) => f.name === row.brand && f.material === row.material
   )
   const selected = filaments.find((f) => String(f.id) === row.filamentId)
+  const [showOverride, setShowOverride] = React.useState(row.priceOverride !== "")
 
   return (
     <div className="space-y-1.5">
@@ -175,6 +183,42 @@ function FilamentRowEditor({
           <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
             {selected.avg_price_per_kg.toFixed(2)} {currency}/kg
           </span>
+          {!showOverride && (
+            <button
+              type="button"
+              className="text-primary underline-offset-2 hover:underline"
+              onClick={() => setShowOverride(true)}
+            >
+              Override price/kg
+            </button>
+          )}
+        </div>
+      )}
+      {selected && showOverride && (
+        <div className="flex items-center gap-2 pl-1">
+          <Label className="text-xs text-muted-foreground">Override price ({currency}/kg)</Label>
+          <Input
+            type="number"
+            step="0.0001"
+            min="0.0001"
+            className="h-8 w-28"
+            placeholder={selected.avg_price_per_kg.toFixed(2)}
+            value={row.priceOverride}
+            onChange={(e) => onChange({ ...row, priceOverride: e.target.value })}
+          />
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="size-7"
+            aria-label="Clear override"
+            onClick={() => {
+              setShowOverride(false)
+              onChange({ ...row, priceOverride: "" })
+            }}
+          >
+            <X className="size-3.5" />
+          </Button>
         </div>
       )}
     </div>
@@ -251,6 +295,10 @@ export default function OrderForm() {
             material: it.filament?.material ?? "",
             filamentId: String(it.filament?.id ?? it.filament_id ?? ""),
             weight: String(it.weight_g),
+            priceOverride:
+              it.price_per_kg_override !== null && it.price_per_kg_override !== undefined
+                ? String(it.price_per_kg_override)
+                : "",
           })),
         }))
       )
@@ -314,10 +362,17 @@ export default function OrderForm() {
                   material: fl.matched.material,
                   filamentId: String(fl.matched.id),
                   weight: String(fl.used_g),
+                  priceOverride: "",
                 }
               }
               unmatched.push(`${fl.type} (${fl.color}) — plate ${pl.index}`)
-              return { brand: "", material: "", filamentId: "", weight: String(fl.used_g) }
+              return {
+                brand: "",
+                material: "",
+                filamentId: "",
+                weight: String(fl.used_g),
+                priceOverride: "",
+              }
             }) || [emptyRow()],
         }))
       )
@@ -354,7 +409,11 @@ export default function OrderForm() {
         print_time_hours: (Number(p.hours) || 0) + (Number(p.minutes) || 0) / 60,
         filaments: p.filaments
           .filter((f) => f.filamentId && Number(f.weight) > 0)
-          .map((f) => ({ filament_id: Number(f.filamentId), weight_g: Number(f.weight) })),
+          .map((f) => ({
+            filament_id: Number(f.filamentId),
+            weight_g: Number(f.weight),
+            price_per_kg_override: f.priceOverride ? Number(f.priceOverride) : null,
+          })),
       })),
     }
 

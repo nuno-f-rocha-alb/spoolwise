@@ -152,6 +152,50 @@ class Filament(db.Model):
             )
         )
 
+    def _recompute_avg_price(self):
+        """avg_price_per_kg from scratch over the remaining purchase log.
+
+        Ignores consumption (same blind spot add_purchase already has) —
+        stock_g is tracked separately and delta-adjusted by the caller."""
+        total_g = Decimal(0)
+        total_value = Decimal(0)
+        for p in self.purchases:
+            qty_g = Decimal(str(p.quantity_g))
+            total_g += qty_g
+            total_value += (qty_g / Decimal(1000)) * Decimal(str(p.price_per_kg))
+        self.avg_price_per_kg = (total_value / (total_g / Decimal(1000))) if total_g > 0 else Decimal(0)
+
+    def edit_purchase(self, purchase, quantity_g, price_per_kg):
+        quantity_g = Decimal(str(quantity_g))
+        price_per_kg = Decimal(str(price_per_kg))
+        if not quantity_g.is_finite() or quantity_g <= 0:
+            raise ValueError("Purchase quantity must be greater than zero.")
+        if not price_per_kg.is_finite() or price_per_kg <= 0:
+            raise ValueError("Purchase price must be greater than zero.")
+        old_qty = Decimal(str(purchase.quantity_g))
+        new_stock = (self.stock_g or Decimal(0)) - old_qty + quantity_g
+        if new_stock < 0:
+            raise ValueError(
+                "Can't reduce this purchase that far — that filament has already "
+                "been used in orders since."
+            )
+        purchase.quantity_g = quantity_g
+        purchase.price_per_kg = price_per_kg
+        self.stock_g = new_stock
+        self._recompute_avg_price()
+
+    def delete_purchase(self, purchase):
+        qty = Decimal(str(purchase.quantity_g))
+        new_stock = (self.stock_g or Decimal(0)) - qty
+        if new_stock < 0:
+            raise ValueError(
+                "Can't delete this purchase — that filament has already been used in orders since."
+            )
+        self.stock_g = new_stock
+        self.purchases.remove(purchase)
+        db.session.delete(purchase)
+        self._recompute_avg_price()
+
 
 class FilamentPurchase(db.Model):
     __tablename__ = "filament_purchases"
@@ -363,6 +407,7 @@ class PlateFilament(db.Model):
     filament_id = db.Column(db.Integer, db.ForeignKey("filaments.id"), nullable=False)
     weight_g = db.Column(Numeric(12, 2), nullable=False)
     price_per_kg_snapshot = db.Column(Numeric(12, 4), nullable=False)
+    price_per_kg_override = db.Column(Numeric(12, 4), nullable=True)
 
     filament = db.relationship("Filament")
 

@@ -129,6 +129,21 @@ def _run_additive_migrations(app):
                 conn.execute(text(f"ALTER TABLE print_orders ADD COLUMN {col_name} {col_spec}"))
                 conn.commit()
 
+        # plate_filaments.price_per_kg_override — per-line "what if" price override
+        result = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = DATABASE() "
+                "AND table_name = 'plate_filaments' "
+                "AND column_name = 'price_per_kg_override'"
+            )
+        )
+        if result.scalar() == 0:
+            conn.execute(
+                text("ALTER TABLE plate_filaments ADD COLUMN price_per_kg_override DECIMAL(12,4) NULL")
+            )
+            conn.commit()
+
 
 def _has_column(conn, table, column):
     return conn.execute(

@@ -52,6 +52,33 @@ export function usePurchaseFilament(id: number) {
   })
 }
 
+export function useEditPurchase(id: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { purchaseId: number; quantity_g: number; price_per_kg: number }) =>
+      api.put<FilamentDetailResponse>(`/api/filaments/${id}/purchases/${input.purchaseId}`, {
+        quantity_g: input.quantity_g,
+        price_per_kg: input.price_per_kg,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["filaments"] })
+      qc.invalidateQueries({ queryKey: ["filament", id] })
+    },
+  })
+}
+
+export function useDeletePurchase(id: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (purchaseId: number) =>
+      api.del<FilamentDetailResponse>(`/api/filaments/${id}/purchases/${purchaseId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["filaments"] })
+      qc.invalidateQueries({ queryKey: ["filament", id] })
+    },
+  })
+}
+
 export function useAdjustFilament(id: number) {
   const qc = useQueryClient()
   return useMutation({

@@ -90,6 +90,7 @@ export interface PlateItem {
   filament_id: number
   weight_g: number
   price_per_kg_snapshot: number
+  price_per_kg_override: number | null
   cost: number
   filament: {
     id: number
@@ -299,7 +300,11 @@ export interface OrderFormPayload {
   plates: {
     name: string | null
     print_time_hours: number
-    filaments: { filament_id: number; weight_g: number }[]
+    filaments: {
+      filament_id: number
+      weight_g: number
+      price_per_kg_override?: number | null
+    }[]
   }[]
 }
 

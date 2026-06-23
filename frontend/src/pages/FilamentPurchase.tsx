@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ArrowLeft, ShoppingCart, TriangleAlert } from "lucide-react"
+import { ArrowLeft, Pencil, ShoppingCart, Trash2, TriangleAlert, X } from "lucide-react"
 import { Link, useParams } from "react-router-dom"
 
 import { FilamentSwatch } from "@/components/FilamentSwatch"
@@ -30,6 +30,8 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import {
   useAdjustFilament,
+  useDeletePurchase,
+  useEditPurchase,
   useFilamentDetail,
   usePurchaseFilament,
 } from "@/hooks/useFilaments"
@@ -43,6 +45,8 @@ export default function FilamentPurchase() {
   const { data, isLoading, isError } = useFilamentDetail(fid)
   const purchase = usePurchaseFilament(fid)
   const adjust = useAdjustFilament(fid)
+  const editPurchase = useEditPurchase(fid)
+  const deletePurchase = useDeletePurchase(fid)
 
   const [qty, setQty] = React.useState("")
   const [price, setPrice] = React.useState("")
@@ -52,6 +56,12 @@ export default function FilamentPurchase() {
   const [adjStock, setAdjStock] = React.useState("")
   const [confirmAdjust, setConfirmAdjust] = React.useState(false)
   const [adjustMsg, setAdjustMsg] = React.useState<string | null>(null)
+
+  const [editingId, setEditingId] = React.useState<number | null>(null)
+  const [editQty, setEditQty] = React.useState("")
+  const [editPrice, setEditPrice] = React.useState("")
+  const [rowErr, setRowErr] = React.useState<string | null>(null)
+  const [deleteTargetId, setDeleteTargetId] = React.useState<number | null>(null)
 
   const initialised = React.useRef(false)
   React.useEffect(() => {
@@ -105,6 +115,36 @@ export default function FilamentPurchase() {
           ),
       }
     )
+  }
+
+  function startEdit(pid: number, quantity_g: number, price_per_kg: number) {
+    setRowErr(null)
+    setEditingId(pid)
+    setEditQty(String(quantity_g))
+    setEditPrice(String(price_per_kg))
+  }
+
+  function saveEdit(pid: number) {
+    setRowErr(null)
+    editPurchase.mutate(
+      { purchaseId: pid, quantity_g: Number(editQty), price_per_kg: Number(editPrice) },
+      {
+        onSuccess: () => setEditingId(null),
+        onError: (err) =>
+          setRowErr(err instanceof ApiError ? err.message : "Could not update purchase."),
+      }
+    )
+  }
+
+  function runDelete(pid: number) {
+    setRowErr(null)
+    deletePurchase.mutate(pid, {
+      onSuccess: () => setDeleteTargetId(null),
+      onError: (err) => {
+        setDeleteTargetId(null)
+        setRowErr(err instanceof ApiError ? err.message : "Could not delete purchase.")
+      },
+    })
   }
 
   function runAdjust() {
@@ -212,6 +252,13 @@ export default function FilamentPurchase() {
           <div className="border-b border-border px-5 py-3">
             <h2 className="font-semibold">Purchase history</h2>
           </div>
+          {rowErr && (
+            <div className="px-5 pt-3">
+              <Alert variant="destructive">
+                <AlertDescription>{rowErr}</AlertDescription>
+              </Alert>
+            </div>
+          )}
           {purchases.length === 0 ? (
             <div className="px-5 py-10 text-center text-sm text-muted-foreground">
               No purchases recorded yet.
@@ -223,22 +270,94 @@ export default function FilamentPurchase() {
                   <TableHead>Date</TableHead>
                   <TableHead className="text-right">Qty (g)</TableHead>
                   <TableHead className="text-right">{currency}/kg</TableHead>
+                  <TableHead className="w-20" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {purchases.map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell className="text-muted-foreground">
-                      {formatDateTime(p.purchased_at)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {Math.round(p.quantity_g)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {p.price_per_kg.toFixed(2)}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {purchases.map((p) =>
+                  editingId === p.id ? (
+                    <TableRow key={p.id}>
+                      <TableCell className="text-muted-foreground">
+                        {formatDateTime(p.purchased_at)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0.01"
+                          aria-label="Quantity (g)"
+                          className="h-8 text-right"
+                          value={editQty}
+                          onChange={(e) => setEditQty(e.target.value)}
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number"
+                          step="0.0001"
+                          min="0.0001"
+                          aria-label={`Price (${currency}/kg)`}
+                          className="h-8 text-right"
+                          value={editPrice}
+                          onChange={(e) => setEditPrice(e.target.value)}
+                        />
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-7"
+                          aria-label="Save changes"
+                          disabled={editPurchase.isPending}
+                          onClick={() => saveEdit(p.id)}
+                        >
+                          {editPurchase.isPending ? <Spinner className="size-3.5" /> : "✓"}
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-7"
+                          aria-label="Cancel edit"
+                          onClick={() => setEditingId(null)}
+                        >
+                          <X className="size-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    <TableRow key={p.id}>
+                      <TableCell className="text-muted-foreground">
+                        {formatDateTime(p.purchased_at)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {Math.round(p.quantity_g)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {p.price_per_kg.toFixed(2)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-7"
+                          aria-label="Edit purchase"
+                          onClick={() => startEdit(p.id, p.quantity_g, p.price_per_kg)}
+                        >
+                          <Pencil className="size-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-7 text-destructive hover:text-destructive"
+                          aria-label="Delete purchase"
+                          onClick={() => setDeleteTargetId(p.id)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )
+                )}
               </TableBody>
             </Table>
           )}
@@ -328,6 +447,27 @@ export default function FilamentPurchase() {
               onClick={runAdjust}
             >
               Set stock
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={deleteTargetId !== null} onOpenChange={(o) => !o && setDeleteTargetId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this purchase?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Stock and the weighted average price will be recalculated.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className={styledCancel()}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className={cn(buttonVariants({ variant: "destructive" }))}
+              disabled={deletePurchase.isPending}
+              onClick={() => deleteTargetId !== null && runDelete(deleteTargetId)}
+            >
+              {deletePurchase.isPending ? <Spinner className="size-3.5" /> : null}
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -238,6 +238,45 @@ Knocked out the deferred follow-ups.
   deep-link serve, public pending, authed me/dashboard/stats/admin, file 404); and a **fresh image build**
   with the trimmed `requirements.txt` imports cleanly with Bootstrap-Flask/WTForms/Flask-WTF **absent**.
 
+### §18 — Filament price override (orders) + purchase edit/delete
+Two post-migration features, built via the `/flow` loop (spec → build → objective gate).
+
+- **Price override (Feature 1):** new nullable `PlateFilament.price_per_kg_override` (Numeric(12,4)).
+  Per-line optional "what-if" price on order plates — applies to **every** order, not just retail/VAT.
+  `_parse_plates_payload` threads it through as a 3rd tuple element; `order_create`/`order_update` write
+  `price_per_kg_snapshot = override or snapshot_price(f)` **and** persist the raw override.
+  **Decision — override-vs-snapshot:** `snapshot` stays the single source of truth for *cost math* (so the
+  whole costing/quote/stats stack reads one field, untouched); `override` is the audit/echo field that the
+  internal OrderForm prefills from, so re-editing an order doesn't silently drop the override (`order_update`
+  rebuilds plates from scratch — without prefill the override would vanish). Override is **not** exposed on
+  customer-facing Quote serializers (they already read snapshot only).
+- **Purchase edit/delete (Feature 2):** `Filament.edit_purchase`/`delete_purchase` + `_recompute_avg_price`,
+  and `PUT`/`DELETE /api/filaments/<fid>/purchases/<pid>`.
+  **Root cause / key split — stock is delta-adjusted, avg is recomputed:** orders consume from an
+  undifferentiated stock pool with no FIFO link back to specific purchase rows, so `stock_g` is adjusted by
+  the *delta* (old_qty→new_qty on edit, −qty on delete), never replayed from the purchase log. `avg_price_per_kg`
+  *is* recomputed from scratch over remaining purchases (same consumption blind-spot the incremental
+  `add_purchase` already had — a separate concern from stock). All-purchases-deleted falls out to 0 naturally.
+  **Negative-stock guard (409):** before committing an edit/delete, if the resulting `stock_g` would go
+  negative (grams already consumed by orders since), reject with HTTP 409 — matches the existing
+  duplicate-filament 409 convention. Server is the source of truth; the client never predicts the guard.
+- **Migration:** additive `ALTER TABLE plate_filaments ADD COLUMN price_per_kg_override DECIMAL(12,4) NULL`
+  via the existing idempotent `_run_additive_migrations` startup mechanism (no Flask-Migrate).
+- **Gate:** `tsc --noEmit` clean; CodeRabbit clean after one fix pass (added model-layer qty/price>0
+  validation, made invalid override a **400** instead of silently nulling it, a11y labels on the inline
+  edit controls, disabled the delete button while pending). Live-verified: override snap/cost + serializer +
+  edit-form prefill + 400 on bad override; edit recompute, 409 guard leaves data unchanged, happy-path
+  delete + all-deleted→0.
+
+## TODO (next session — not started)
+- **Bug: editing an order loses a plate's "printed" mark.** Re-saving an order via
+  `PUT /api/orders/:id` (`order_update` in `app/api.py`) deletes every `PrintPlate` and recreates them
+  from the payload, so `printed_at` (and the printed/skipped state) is reset to null. Fix: preserve
+  per-plate `printed_at`/`is_skipped` across an edit — match plates by position/identity and carry the
+  flags over, or update in place instead of delete+recreate. Re-sync order status after.
+- **Update `README.md`** to reflect the SPA (React frontend, build/run, the cutover) — it likely still
+  describes the old Jinja app.
+
 ## Open issues (not yet addressed)
 - **3MF thumbnail deletion** (`file_delete`) removes *all* of an order's plate thumbnails, not just the
   deleted 3MF's — mirrors a pre-existing Jinja bug. Proper fix needs an `OrderFile.parent_file_id` column +
