@@ -47,8 +47,9 @@ export function formatDate(iso: string | null): string {
   })
 }
 
-// Render `print_time_hours` (decimal hours) as "Hh MMm", matching the Jinja
-// `duration` filter.
+// Render `print_time_hours` (decimal hours) as "Hh MMm", adding a leading
+// "Dd" when the total is 24h or more. Matches the Jinja `duration` filter
+// otherwise.
 export function duration(hours: number): string {
   const h = Math.floor(hours)
   let m = Math.round((hours - h) * 60)
@@ -56,6 +57,10 @@ export function duration(hours: number): string {
   if (m === 60) {
     hh += 1
     m = 0
+  }
+  if (hh >= 24) {
+    const d = Math.floor(hh / 24)
+    return `${d}d ${hh % 24}h ${String(m).padStart(2, "0")}m`
   }
   return `${hh}h ${String(m).padStart(2, "0")}m`
 }

@@ -39,7 +39,7 @@ import {
   useUploadOrderFile,
 } from "@/hooks/useOrderDetail"
 import { useDeleteOrder } from "@/hooks/useOrders"
-import { duration, formatDateTime, money } from "@/lib/format"
+import { duration, formatDateTime, grams, money } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { Plate } from "@/types"
 
@@ -453,6 +453,16 @@ export default function OrderDetail() {
               <SummaryRow
                 label="Total print time"
                 value={duration(o.total_print_time_hours)}
+                strong
+              />
+              <SummaryRow
+                label={`Filament used${o.quantity > 1 ? ` (× ${o.quantity})` : ""}`}
+                value={grams(
+                  o.plates.reduce(
+                    (sum, pl) => sum + pl.items.reduce((s, it) => s + it.weight_g, 0),
+                    0
+                  ) * o.quantity
+                )}
                 strong
               />
               <SummaryRow
