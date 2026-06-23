@@ -388,6 +388,8 @@ export default function OrderDetail() {
                   <Badge variant="success">Delivered</Badge>
                 ) : o.status === "printed" ? (
                   <Badge variant="info">Printed</Badge>
+                ) : o.status === "partially_printed" ? (
+                  <Badge variant="warning">Partially printed</Badge>
                 ) : (
                   <Badge variant="secondary">Pending</Badge>
                 )}

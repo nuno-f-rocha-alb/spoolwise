@@ -322,6 +322,9 @@ class PrintOrder(db.Model):
             return "delivered"
         if self.printed_at:
             return "printed"
+        active = [p for p in self.plates if not p.is_skipped]
+        if any(p.printed_at for p in active):
+            return "partially_printed"
         return "pending"
 
     def mark_printed(self, value: bool):

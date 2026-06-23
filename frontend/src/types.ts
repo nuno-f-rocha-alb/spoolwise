@@ -33,6 +33,7 @@ export interface Filament {
   color: string
   color_hex: string | null
   stock_g: number
+  physical_stock_g: number
   stock_kg: number
   avg_price_per_kg: number
   stock_value: number

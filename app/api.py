@@ -16,6 +16,7 @@ from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, abort, current_app, jsonify, request, session
 from flask_login import current_user, login_required, login_user, logout_user
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
 
@@ -146,7 +147,32 @@ def auth_logout():
     return jsonify({"ok": True, "was_sso": was_sso})
 
 
-def serialize_filament(f: Filament) -> dict:
+def _reserved_unprinted_map(user_id) -> dict:
+    """{filament_id: grams} reserved by orders that deducted stock at create but
+    aren't printed yet. physical_stock_g = stock_g + this (the grams will leave
+    the shelf only when the plate is marked printed)."""
+    rows = (
+        db.session.query(
+            PlateFilament.filament_id,
+            func.coalesce(func.sum(PlateFilament.weight_g * PrintOrder.quantity), 0),
+        )
+        .join(PrintPlate, PlateFilament.plate_id == PrintPlate.id)
+        .join(PrintOrder, PrintPlate.order_id == PrintOrder.id)
+        .filter(PrintOrder.user_id == user_id)
+        .filter(PrintOrder.skip_stock_deduction.is_(False))
+        .filter(PrintPlate.is_skipped.is_(False))
+        .filter(PrintPlate.printed_at.is_(None))
+        .group_by(PlateFilament.filament_id)
+        .all()
+    )
+    return {fid: Decimal(str(g)) for fid, g in rows}
+
+
+def _reserved_unprinted(f: Filament) -> Decimal:
+    return _reserved_unprinted_map(f.user_id).get(f.id, Decimal(0))
+
+
+def serialize_filament(f: Filament, reserved_unprinted: Decimal = Decimal(0)) -> dict:
     stock_g = Decimal(str(f.stock_g or 0))
     return {
         "id": f.id,
@@ -155,6 +181,7 @@ def serialize_filament(f: Filament) -> dict:
         "color": f.color,
         "color_hex": f.color_hex,
         "stock_g": float(stock_g),
+        "physical_stock_g": float(stock_g + reserved_unprinted),
         "stock_kg": float(f.stock_kg),
         "avg_price_per_kg": float(f.avg_price_per_kg or 0),
         "stock_value": float(f.stock_value),
@@ -236,6 +263,7 @@ def dashboard():
     low_stock_count = sum(
         1 for f in filaments if Decimal(str(f.stock_g or 0)) <= LOW_STOCK_G
     )
+    reserved = _reserved_unprinted_map(current_user.id)
 
     return jsonify(
         {
@@ -246,7 +274,9 @@ def dashboard():
                 "filament_count": len(filaments),
                 "low_stock_count": low_stock_count,
             },
-            "filaments": [serialize_filament(f) for f in filaments],
+            "filaments": [
+                serialize_filament(f, reserved.get(f.id, Decimal(0))) for f in filaments
+            ],
             "recent_orders": [serialize_order_summary(o) for o in recent],
         }
     )
@@ -275,10 +305,13 @@ def filaments_list():
     )
     materials = sorted({f.material for f in filaments})
     brands = sorted({f.name for f in filaments})
+    reserved = _reserved_unprinted_map(current_user.id)
     return jsonify(
         {
             "currency": Setting.get("currency_symbol", cast=str) or "€",
-            "filaments": [serialize_filament(f) for f in filaments],
+            "filaments": [
+                serialize_filament(f, reserved.get(f.id, Decimal(0))) for f in filaments
+            ],
             "materials": materials,
             "brands": brands,
         }
@@ -297,7 +330,7 @@ def filament_detail(fid):
     return jsonify(
         {
             "currency": Setting.get("currency_symbol", cast=str) or "€",
-            "filament": serialize_filament(f),
+            "filament": serialize_filament(f, _reserved_unprinted(f)),
             "purchases": [serialize_purchase(p) for p in purchases],
         }
     )
@@ -360,7 +393,7 @@ def filament_purchase(fid):
         return jsonify({"error": "Quantity and price must be positive."}), 400
     f.add_purchase(quantity_g, price_per_kg)
     db.session.commit()
-    return jsonify({"filament": serialize_filament(f)})
+    return jsonify({"filament": serialize_filament(f, _reserved_unprinted(f))})
 
 
 def _user_purchase_or_404(fid, pid):
@@ -391,7 +424,10 @@ def filament_purchase_edit(fid, pid):
         .all()
     )
     return jsonify(
-        {"filament": serialize_filament(f), "purchases": [serialize_purchase(x) for x in purchases]}
+        {
+            "filament": serialize_filament(f, _reserved_unprinted(f)),
+            "purchases": [serialize_purchase(x) for x in purchases],
+        }
     )
 
 
@@ -410,7 +446,10 @@ def filament_purchase_delete(fid, pid):
         .all()
     )
     return jsonify(
-        {"filament": serialize_filament(f), "purchases": [serialize_purchase(x) for x in purchases]}
+        {
+            "filament": serialize_filament(f, _reserved_unprinted(f)),
+            "purchases": [serialize_purchase(x) for x in purchases],
+        }
     )
 
 
@@ -425,7 +464,7 @@ def filament_adjust(fid):
     # Inventory correction only — does NOT touch the weighted-average price.
     f.stock_g = new_stock
     db.session.commit()
-    return jsonify({"filament": serialize_filament(f)})
+    return jsonify({"filament": serialize_filament(f, _reserved_unprinted(f))})
 
 
 @api_bp.delete("/filaments/<int:fid>")
@@ -1032,8 +1071,17 @@ def order_update(oid):
     skip = fields["skip_stock_check"]
     qty_dec = Decimal(fields["quantity"])
 
+    # Preserve per-plate printed/skip state across the delete+recreate below.
+    # ponytail: position-keyed — the payload carries no plate ids, so reordering or
+    # deleting a plate mid-edit can misattribute these flags. Upgrade path: thread
+    # plate ids through the payload and match on them.
+    preserved = {p.position: (p.printed_at, p.is_skipped) for p in order.plates}
+
     filament_usage: dict = {}
-    for _pt, _pn, items in plates_data:
+    for pos, (_pt, _pn, items) in enumerate(plates_data, start=1):
+        prev = preserved.get(pos)
+        if prev and prev[1]:  # plate stays skipped → not deducted
+            continue
         for fid, w, _override in items:
             filament_usage[fid] = filament_usage.get(fid, Decimal(0)) + w * qty_dec
 
@@ -1106,7 +1154,15 @@ def order_update(oid):
 
     snapshot_price = _snapshot_price_factory(fields["has_vat"], current_user.id)
     for pos, (pt, pname, items) in enumerate(plates_data, start=1):
-        plate = PrintPlate(order_id=order.id, position=pos, name=pname, print_time_hours=pt)
+        prev = preserved.get(pos)
+        plate = PrintPlate(
+            order_id=order.id,
+            position=pos,
+            name=pname,
+            print_time_hours=pt,
+            printed_at=prev[0] if prev else None,
+            is_skipped=prev[1] if prev else False,
+        )
         db.session.add(plate)
         db.session.flush()
         for fid, w, override in items:
@@ -1126,6 +1182,8 @@ def order_update(oid):
             filament_objs[fid].stock_g = (
                 Decimal(str(filament_objs[fid].stock_g or 0)) - total_w
             )
+
+    _sync_order_printed(order)
 
     db.session.commit()
     return jsonify(
@@ -1297,7 +1355,11 @@ def stats():
                 "total": len(all_orders),
                 "commercial": len(commercial),
                 "internal": len(internal),
-                "pending": sum(1 for o in all_orders if o.status == "pending"),
+                # ponytail: partially_printed = in-progress, folded into pending so
+                # pending+printed+delivered still sums to total (no extra UI bucket).
+                "pending": sum(
+                    1 for o in all_orders if o.status in ("pending", "partially_printed")
+                ),
                 "printed": sum(1 for o in all_orders if o.status == "printed"),
                 "delivered": sum(1 for o in all_orders if o.status == "delivered"),
             },

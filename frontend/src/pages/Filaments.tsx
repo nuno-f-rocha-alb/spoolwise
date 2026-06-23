@@ -127,7 +127,7 @@ export default function Filaments() {
           : sort === "color"
             ? f.color
             : sort === "stock"
-              ? f.stock_g
+              ? f.physical_stock_g
               : f.avg_price_per_kg
     return [...list].sort((a, b) => {
       const va = val(a)
@@ -189,7 +189,7 @@ export default function Filaments() {
               <SortHeader label="Brand" col="name" sort={sort} dir={dir} onSort={onSort} />
               <SortHeader label="Material" col="material" sort={sort} dir={dir} onSort={onSort} />
               <SortHeader label="Color" col="color" sort={sort} dir={dir} onSort={onSort} />
-              <SortHeader label="Stock (kg)" col="stock" sort={sort} dir={dir} onSort={onSort} className="text-right" />
+              <SortHeader label="On hand (kg)" col="stock" sort={sort} dir={dir} onSort={onSort} className="text-right" />
               <SortHeader label={`Avg price (${currency}/kg)`} col="price" sort={sort} dir={dir} onSort={onSort} className="text-right" />
               <TableHead className="text-right">Value</TableHead>
               <TableHead className="text-right" />
@@ -218,13 +218,22 @@ export default function Filaments() {
                   <TableCell
                     className={cn(
                       "text-right tabular-nums",
-                      f.stock_kg <= 0.1 && "font-bold text-destructive"
+                      f.physical_stock_g <= 100 && "font-bold text-destructive"
                     )}
                   >
-                    {f.stock_kg.toLocaleString(undefined, {
+                    {(f.physical_stock_g / 1000).toLocaleString(undefined, {
                       minimumFractionDigits: 3,
                       maximumFractionDigits: 3,
                     })}
+                    {f.physical_stock_g !== f.stock_g && (
+                      <div className="text-xs font-normal text-muted-foreground">
+                        {f.stock_kg.toLocaleString(undefined, {
+                          minimumFractionDigits: 3,
+                          maximumFractionDigits: 3,
+                        })}{" "}
+                        after orders
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {f.avg_price_per_kg.toLocaleString(undefined, {

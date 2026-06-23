@@ -32,7 +32,7 @@ import { duration, formatDateTime, money } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { OrderListItem } from "@/types"
 
-type StatusFilter = "all" | "pending" | "printed" | "delivered"
+type StatusFilter = "all" | "pending" | "partially_printed" | "printed" | "delivered"
 type TypeFilter = "all" | "commercial" | "internal"
 
 function Chips<T extends string>({
@@ -64,6 +64,8 @@ function Chips<T extends string>({
 function StatusBadge({ status }: { status: string }) {
   if (status === "delivered") return <Badge variant="success">Delivered</Badge>
   if (status === "printed") return <Badge variant="info">Printed</Badge>
+  if (status === "partially_printed")
+    return <Badge variant="warning">Partially printed</Badge>
   return <Badge variant="secondary">Pending</Badge>
 }
 
@@ -145,6 +147,7 @@ export default function Orders() {
           options={[
             { value: "all", label: "All" },
             { value: "pending", label: "Pending" },
+            { value: "partially_printed", label: "Partially printed" },
             { value: "printed", label: "Printed" },
             { value: "delivered", label: "Delivered" },
           ]}

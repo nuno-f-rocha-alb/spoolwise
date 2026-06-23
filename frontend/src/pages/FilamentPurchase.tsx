@@ -173,8 +173,11 @@ export default function FilamentPurchase() {
             </span>
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Current stock <strong className="text-foreground">{Math.round(f.stock_g)} g</strong> ·
-            Avg price{" "}
+            On hand <strong className="text-foreground">{Math.round(f.physical_stock_g)} g</strong>
+            {f.physical_stock_g !== f.stock_g && (
+              <> ({Math.round(f.stock_g)} g after orders)</>
+            )}{" "}
+            · Avg price{" "}
             <strong className="text-foreground">
               {money(f.avg_price_per_kg, currency)}/kg
             </strong>

@@ -268,12 +268,33 @@ Two post-migration features, built via the `/flow` loop (spec → build → obje
   edit-form prefill + 400 on bad override; edit recompute, 409 guard leaves data unchanged, happy-path
   delete + all-deleted→0.
 
+### §19 — Physical (on-hand) stock + plate-printed persistence + partial status
+Three linked changes; stock model **unchanged** (still deduct-at-create / reservation).
+
+- **Dual-display physical stock:** the filament view showed `stock_g` = reserved (deducted at create for
+  every order, printed or not), which reads as "you have less than you do". Added a derived
+  `physical_stock_g = stock_g + reserved-but-not-yet-printed` (`_reserved_unprinted_map`: sum of
+  `weight_g × order.quantity` over unprinted, non-skipped, non-quote plates). Marking a plate printed makes
+  its grams leave "reserved-unprinted", so physical drops to match reality.
+  **Decision — dual display, not deduct-at-print:** keeping deduction at create avoids reworking the whole
+  create/update/delete/skip stock plumbing **and needs no migration/backfill** — physical is computed live.
+  The UI shows on-hand as the primary number with "X after orders" as a secondary line only when they differ.
+- **Bug fix (was the §17 TODO): editing an order wiped a plate's printed mark.** `order_update`
+  delete+recreates all plates, so `printed_at`/`is_skipped` were lost.
+  **Root cause:** the rebuild started every plate fresh. Fix: capture `{position: (printed_at, is_skipped)}`
+  before the delete and restore both on recreate. `filament_usage` now **excludes plates that stay skipped**
+  so the restore/re-deduct stock math stays correct, and `_sync_order_printed` runs after the rebuild.
+  **Ceiling:** plates are matched **by position** (the payload carries no plate ids), so reordering/deleting
+  a plate mid-edit can misattribute the flags — marked with a `ponytail:` comment; upgrade path is to thread
+  plate ids through the payload.
+- **`partially_printed` status:** new `PrintOrder.status` branch when ≥1 non-skipped plate is printed but
+  not all. Stats folds it into the `pending` bucket so pending+printed+delivered still sums to total
+  (no extra UI bucket). Frontend: amber badge + filter in Orders, badge in OrderDetail.
+- **Gate:** tsc clean; CodeRabbit clean after one fix (low-stock highlight was keyed on reserved while the
+  cell now displays physical — aligned to physical). Live-verified end-to-end (physical 2008→1708 on print,
+  reserved steady at 1408, printed mark survives edit, partial badge renders).
+
 ## TODO (next session — not started)
-- **Bug: editing an order loses a plate's "printed" mark.** Re-saving an order via
-  `PUT /api/orders/:id` (`order_update` in `app/api.py`) deletes every `PrintPlate` and recreates them
-  from the payload, so `printed_at` (and the printed/skipped state) is reset to null. Fix: preserve
-  per-plate `printed_at`/`is_skipped` across an edit — match plates by position/identity and carry the
-  flags over, or update in place instead of delete+recreate. Re-sync order status after.
 - **Update `README.md`** to reflect the SPA (React frontend, build/run, the cutover) — it likely still
   describes the old Jinja app.
 
