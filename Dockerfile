@@ -1,5 +1,5 @@
 # ---- Stage 1: build the React SPA ----
-FROM node:20-slim AS spa
+FROM node:22-slim AS spa
 WORKDIR /spa
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
